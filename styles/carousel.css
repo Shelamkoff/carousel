@@ -1,0 +1,250 @@
+/* ══════════════════════════════════════════
+   Carousel — CSS Custom Properties (Theming)
+   ══════════════════════════════════════════ */
+
+.carousel {
+  /* ── Layout ── */
+  --carousel-gap: 0px;
+
+  /* ── Transition ── */
+  --carousel-transition-duration: 400ms;
+  --carousel-transition-timing: ease;
+
+  /* ── Arrows ── */
+  --carousel-arrow-size: 40px;
+  --carousel-arrow-offset: 12px;
+  --carousel-arrow-bg: rgba(255, 255, 255, 0.9);
+  --carousel-arrow-bg-hover: #fff;
+  --carousel-arrow-color: #333;
+  --carousel-arrow-color-hover: #111;
+  --carousel-arrow-radius: 50%;
+  --carousel-arrow-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  --carousel-arrow-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.2);
+
+  /* ── Dots ── */
+  --carousel-dots-gap: 8px;
+  --carousel-dots-padding: 12px 0;
+  --carousel-dot-size: 10px;
+  --carousel-dot-bg: rgba(0, 0, 0, 0.2);
+  --carousel-dot-bg-hover: rgba(0, 0, 0, 0.4);
+  --carousel-dot-bg-active: rgba(0, 0, 0, 0.7);
+  --carousel-dot-radius: 50%;
+  --carousel-dot-scale-active: 1.2;
+
+  /* ── Thumbnails ── */
+  --carousel-thumb-gap: 6px;
+  --carousel-thumb-padding: 8px 0;
+  --carousel-thumb-border-width: 2px;
+  --carousel-thumb-border-color: transparent;
+  --carousel-thumb-border-color-active: #333;
+  --carousel-thumb-radius: 4px;
+  --carousel-thumb-opacity: 0.6;
+  --carousel-thumb-opacity-hover: 0.9;
+  --carousel-thumb-opacity-active: 1;
+
+  /* ── Lazy load ── */
+  --carousel-lazy-fade-duration: 300ms;
+}
+
+/* ── Core ── */
+
+.carousel {
+  position: relative;
+  width: 100%;
+}
+
+.carousel__viewport {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+}
+
+.carousel__track {
+  display: flex;
+  will-change: transform;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.carousel__slide {
+  /* flex sizing set by JS (slidesPerView) — no default needed */
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.carousel__slide img {
+  -webkit-user-drag: none;
+}
+
+/* Loop mode: track height set by JS, slides positioned by LoopEngine */
+.carousel--loop .carousel__track {
+  position: relative;
+}
+
+/* ── Arrows ── */
+
+.carousel__arrow {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  width: var(--carousel-arrow-size);
+  height: var(--carousel-arrow-size);
+  padding: 0;
+  border: none;
+  border-radius: var(--carousel-arrow-radius);
+  background: var(--carousel-arrow-bg);
+  color: var(--carousel-arrow-color);
+  cursor: pointer;
+  box-shadow: var(--carousel-arrow-shadow);
+  transition: background 0.2s, opacity 0.2s, box-shadow 0.2s, color 0.2s;
+}
+
+.carousel__arrow:hover {
+  background: var(--carousel-arrow-bg-hover);
+  color: var(--carousel-arrow-color-hover);
+  box-shadow: var(--carousel-arrow-shadow-hover);
+}
+
+.carousel__arrow:active {
+  transform: translateY(-50%) scale(0.95);
+}
+
+.carousel__arrow--prev {
+  left: var(--carousel-arrow-offset);
+}
+
+.carousel__arrow--next {
+  right: var(--carousel-arrow-offset);
+}
+
+/* ── Dots ── */
+
+.carousel__dots {
+  display: flex;
+  justify-content: center;
+  gap: var(--carousel-dots-gap);
+  padding: var(--carousel-dots-padding);
+}
+
+.carousel__dot {
+  width: var(--carousel-dot-size);
+  height: var(--carousel-dot-size);
+  padding: 0;
+  border: none;
+  border-radius: var(--carousel-dot-radius);
+  background: var(--carousel-dot-bg);
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s;
+}
+
+.carousel__dot:hover {
+  background: var(--carousel-dot-bg-hover);
+}
+
+.carousel__dot--active {
+  background: var(--carousel-dot-bg-active);
+  transform: scale(var(--carousel-dot-scale-active));
+}
+
+/* ── Thumbnails ── */
+
+.carousel__thumbnails {
+  display: flex;
+  gap: var(--carousel-thumb-gap);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.carousel__thumbnails--bottom {
+  padding: var(--carousel-thumb-padding);
+  justify-content: center;
+}
+
+.carousel__thumbnails--left,
+.carousel__thumbnails--right {
+  flex-direction: column;
+  overflow-x: visible;
+  overflow-y: auto;
+}
+
+.carousel--thumbs-left {
+  display: flex;
+  flex-direction: row-reverse;
+}
+
+.carousel--thumbs-right {
+  display: flex;
+}
+
+.carousel--thumbs-left .carousel__viewport,
+.carousel--thumbs-right .carousel__viewport {
+  flex: 1;
+  min-width: 0;
+}
+
+.carousel__thumb {
+  flex: 0 0 auto;
+  padding: 0;
+  border: var(--carousel-thumb-border-width) solid var(--carousel-thumb-border-color);
+  border-radius: var(--carousel-thumb-radius);
+  background: none;
+  cursor: pointer;
+  overflow: hidden;
+  transition: border-color 0.2s, opacity 0.2s;
+  opacity: var(--carousel-thumb-opacity);
+}
+
+.carousel__thumb:hover {
+  opacity: var(--carousel-thumb-opacity-hover);
+}
+
+.carousel__thumb--active {
+  border-color: var(--carousel-thumb-border-color-active);
+  opacity: var(--carousel-thumb-opacity-active);
+}
+
+.carousel__thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ── Parallax ── */
+
+.carousel__parallax {
+  border-radius: inherit;
+  height: 100%;
+  overflow: hidden;
+}
+
+.carousel__parallax__layer {
+  position: relative;
+  height: 100%;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+  will-change: transform;
+}
+
+.carousel__parallax__layer > img {
+  max-width: none;
+  flex: 0 0 calc(115% + (var(--carousel-gap) * 2));
+  object-fit: cover;
+}
+
+/* ── Lazy loading ── */
+
+.carousel__slide--loaded {
+  animation: carousel-fade-in var(--carousel-lazy-fade-duration) ease;
+}
+
+@keyframes carousel-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
