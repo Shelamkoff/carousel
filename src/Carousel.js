@@ -1,4 +1,4 @@
-import { EventBus } from '../../event-bus/index.js'
+import { EventBus } from '@shelamkoff/event-bus'
 import { SlideManager } from './SlideManager.js'
 import { TrackRenderer } from './TrackRenderer.js'
 import { LoopEngine } from './LoopEngine.js'
