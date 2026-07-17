@@ -212,7 +212,7 @@
     }
   </style>
 </head>
-<body>
+<body data-status="running">
 
   <h1>Carousel Library Demo</h1>
 
@@ -274,6 +274,13 @@
     <div id="demo-parallax"></div>
   </div>
 
+  <script type="importmap">
+    {
+      "imports": {
+        "@shelamkoff/event-bus": "../event-bus/index.js"
+      }
+    }
+  </script>
   <script type="module">
     import {
       Carousel,
@@ -542,6 +549,8 @@
         768: { slidesPerView: 3 },
       },
     })
+
+    document.body.dataset.status = 'pass'
   </script>
 
 </body>

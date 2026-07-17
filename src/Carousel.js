@@ -735,7 +735,9 @@ export class Carousel {
 
   update(options) {
     if (this.#destroyed) return
-    if (!options || typeof options !== 'object') throw new TypeError('Carousel: options must be an object')
+    if (!options || typeof options !== 'object' || Array.isArray(options)) {
+      throw new TypeError('Carousel: options must be an object')
+    }
     if (options.breakpoints !== undefined
       && (!options.breakpoints || typeof options.breakpoints !== 'object' || Array.isArray(options.breakpoints))) {
       throw new TypeError('Carousel: breakpoints must be an object')

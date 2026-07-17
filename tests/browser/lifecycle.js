@@ -29,6 +29,9 @@ try {
   assert(carousel.getSlides().length === 4, 'addSlide failed')
   carousel.removeSlide(1)
   assert(carousel.getSlides().length === 3, 'removeSlide failed')
+  let invalidUpdateRejected = false
+  try { carousel.update([]) } catch { invalidUpdateRejected = true }
+  assert(invalidUpdateRejected, 'an array was accepted as an update options object')
   let invalidIndexRejected = false
   try { carousel.goTo(1.5) } catch { invalidIndexRejected = true }
   assert(invalidIndexRejected, 'fractional navigation index was accepted')

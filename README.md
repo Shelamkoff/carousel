@@ -1,52 +1,169 @@
 # @shelamkoff/carousel
 
-Position-first, framework-agnostic carousel. The core owns slide positioning, loop math, responsive rebuilding, animation cancellation, events, and plugin lifecycle.
+Framework-agnostic, position-based carousel with responsive layouts, loop mode, cancellable transitions, typed events, and composable plugins. Version `1.0.0` is an ESM package for modern browsers.
 
-## Install
+[Русская версия](./README.ru.md)
+
+## Installation
 
 ```bash
 npm install @shelamkoff/carousel @shelamkoff/event-bus
 ```
 
+Import the required stylesheet once in the application:
+
 ```js
-import { Carousel, createArrows, createKeyboard, createSwipe } from '@shelamkoff/carousel'
+import '@shelamkoff/carousel/styles.css'
+```
+
+`carouselStylesUrl` is also exported when the host needs to create its own `<link>` element.
+
+## Quick start
+
+```html
+<div id="gallery"></div>
+```
+
+```js
+import {
+  Carousel,
+  createArrows,
+  createDots,
+  createKeyboard,
+  createSwipe,
+} from '@shelamkoff/carousel'
 import '@shelamkoff/carousel/styles.css'
 
-const container = document.querySelector('#carousel')
-const carousel = new Carousel(container, [
-  { content: () => Object.assign(document.createElement('img'), { src: '/photo.jpg', alt: '' }), thumb: '/thumb-1.jpg' },
+const carousel = new Carousel('#gallery', [
+  {
+    content: () => Object.assign(document.createElement('img'), {
+      src: '/photos/forest.jpg',
+      alt: 'Forest',
+    }),
+    thumb: '/photos/forest-thumb.jpg',
+  },
   { content: '<p>Trusted application markup</p>' },
 ], {
   loop: true,
   gap: 16,
-  plugins: [createArrows(), createKeyboard(), createSwipe({ mouse: true })],
+  plugins: [
+    createArrows(),
+    createDots(),
+    createKeyboard(),
+    createSwipe({ mouse: true }),
+  ],
+})
+
+const unsubscribe = carousel.on('slide:change', ({ index, slide }) => {
+  console.log(index, slide.meta)
 })
 
 carousel.next()
-carousel.update({ slidesPerView: 2, breakpoints: { 900: { slidesPerView: 3 } } })
+
+// Later:
+unsubscribe()
 carousel.destroy()
 ```
 
-`carouselStylesUrl` exposes the packaged stylesheet. Keyboard navigation is scoped to the focusable carousel container by default; `{ scope: 'document' }` is an explicit opt-in.
+The container may be an `HTMLElement` or a CSS selector. A selector that does not resolve to an element causes the constructor to throw.
 
-## Plugins
+## Slide data
 
-- [Arrows](dist/src/plugins/arrows/README.md)
-- [Dots](dist/src/plugins/dots/README.md)
-- [Thumbnails](dist/src/plugins/thumbnails/README.md)
-- [Keyboard](dist/src/plugins/keyboard/README.md)
-- [Swipe](dist/src/plugins/swipe/README.md)
-- [Autoplay](dist/src/plugins/autoplay/README.md)
-- [Lazy load](dist/src/plugins/lazyload/README.md)
-- [Parallax](dist/src/plugins/parallax/README.md)
+```ts
+interface SlideData {
+  content: string | HTMLElement | (() => HTMLElement)
+  thumb?: string
+  lazy?: boolean
+  meta?: Record<string, unknown>
+}
+```
 
-If installation fails, the carousel invokes `plugin.destroy()` and removes all context-owned event subscriptions. Runtime option and breakpoint changes preserve the logical slide and stop obsolete animations before rebuilding.
-Install plugins through `use()` or constructor options; `update()` changes layout/behavior options and intentionally rejects `plugins`.
-Each stateful plugin instance can belong to only one carousel at a time; destroying its owner releases core ownership so a reusable plugin implementation may be installed again. Slide render failures are isolated to the affected slide and runtime rebuild/lazy failures emit `slide:error`.
+- A render function is the safest choice for dynamic or untrusted data.
+- An `HTMLElement` is moved into the carousel; it is not cloned.
+- A string is assigned as HTML and is therefore trusted developer input.
+- `thumb` is consumed by the thumbnails plugin, `lazy` by lazy loading, and `meta` remains application-owned metadata.
+
+## Configuration
+
+| Option | Type | Default | Purpose |
+| --- | --- | --- | --- |
+| `slidesPerView` | `number` | `1` | Number of visible slides. Positive values are required. |
+| `slidesPerScroll` | `number \| 'auto'` | `1` | Navigation step. `'auto'` uses the resolved visible count. |
+| `gap` | `number` | `0` | Gap between slides in CSS pixels. |
+| `transition` | `'slide' \| 'fade'` | `'slide'` | Movement strategy. Fade mode displays one slide at a time. |
+| `transitionDuration` | `number` | `400` | Transition duration in milliseconds. |
+| `loop` | `boolean` | `false` | Enables circular navigation using loop clones. |
+| `startIndex` | `number` | `0` | Initial logical slide index. Used only during construction. |
+| `breakpoints` | `Record<number, Partial<CarouselResponsiveOptions>>` | none | Options applied when the viewport is at least the numeric width. |
+| `plugins` | `CarouselPlugin[]` | `[]` | Plugins installed during construction. |
+
+Breakpoint values override base options. The carousel preserves the current logical slide, cancels obsolete animation work, and rebuilds layout when the active breakpoint changes.
+
+```js
+const carousel = new Carousel('#gallery', slides, {
+  slidesPerView: 1,
+  slidesPerScroll: 'auto',
+  breakpoints: {
+    640: { slidesPerView: 2, gap: 12 },
+    1024: { slidesPerView: 4, gap: 20 },
+  },
+})
+```
+
+## Public API
+
+| Method | Result | Description |
+| --- | --- | --- |
+| `use(plugin)` | `this` | Installs a plugin. Plugin names must be unique. |
+| `getPlugin(name)` | plugin or `undefined` | Returns the installed public plugin object. |
+| `next()` / `prev()` | `void` | Moves by the resolved scroll step. |
+| `goTo(index)` | `void` | Navigates to a logical slide index. |
+| `getIndex()` | `number` | Current internal/render index. Prefer `getRealIndex()` in loop mode. |
+| `getRealIndex()` | `number` | Current logical index in the source slide array. |
+| `getSlide(index?)` | slide or `null` | Returns a logical slide; omitting the index returns the current slide. |
+| `getSlides()` | `SlideData[]` | Returns a defensive array copy of slides. |
+| `addSlide(slide, index?)` | `void` | Adds a slide and rebuilds the layout. |
+| `removeSlide(index)` | `void` | Removes a logical slide and keeps the remaining index valid. |
+| `update(options)` | `void` | Updates layout and behavior. `plugins` and `startIndex` are intentionally rejected. |
+| `on(event, handler)` | unsubscribe function | Subscribes to an event. |
+| `off(event, handler)` | `void` | Removes the exact handler. |
+| `once(event, handler)` | unsubscribe function | Subscribes for one emission. |
+| `destroy()` | `void` | Cancels animations, destroys plugins, removes generated DOM and listeners. |
+
+Do not call methods after `destroy()`. Create a new instance if the host needs to mount the carousel again.
+
+## Events
+
+| Event | Payload |
+| --- | --- |
+| `slide:beforeChange` | `{ fromIndex, toIndex }` |
+| `slide:change` | `{ index, prevIndex, slide }` |
+| `transition:start` | `{ fromIndex, toIndex }` |
+| `transition:end` | `{ index }` |
+| `resize` | `{ slidesPerView }` |
+| `autoplay:start` / `autoplay:stop` | no payload |
+| `slide:lazyload` | `{ index, element }` |
+| `slide:error` | `{ index, error }` |
+| `destroy` | no payload |
+
+Rendering and lazy-load failures are isolated to the affected slide and reported through `slide:error`.
+
+## Built-in plugins
+
+- [Arrows](dist/src/plugins/arrows/README.md) — previous and next buttons; edge hiding is enabled by default.
+- [Dots](dist/src/plugins/dots/README.md) — clickable pagination.
+- [Thumbnails](dist/src/plugins/thumbnails/README.md) — bottom or side thumbnail navigation.
+- [Keyboard](dist/src/plugins/keyboard/README.md) — focus-scoped arrow keys by default; document-wide handling is opt-in.
+- [Swipe](dist/src/plugins/swipe/README.md) — touch, pointer, resistance, and optional mouse drag.
+- [Autoplay](dist/src/plugins/autoplay/README.md) — interval playback with hover and interaction pausing.
+- [Lazy load](dist/src/plugins/lazyload/README.md) — observer-based image loading and configurable preloading.
+- [Parallax](dist/src/plugins/parallax/README.md) — position-driven visual offset.
+
+Install a plugin in `plugins` or with `use()` before destroying the carousel. A stateful plugin instance may belong to only one live carousel; create a fresh plugin object for every concurrent carousel.
 
 ## Creating a plugin
 
-A plugin is an object with a unique `name`, an `install(context)` method, and optional `destroy()`. Prefer a factory so every carousel receives an independent stateful instance:
+A plugin has a unique `name`, `install(context)`, and optional `destroy()`:
 
 ```js
 export function createProgressPlugin() {
@@ -64,7 +181,7 @@ export function createProgressPlugin() {
         element.textContent = `${context.getRealIndex() + 1} / ${context.getSlideCount()}`
       }
 
-      context.getRoot()?.appendChild(element)
+      context.getRoot()?.append(element)
       context.on('slide:change', render)
       context.on('resize', render)
       render()
@@ -78,33 +195,37 @@ export function createProgressPlugin() {
 }
 ```
 
-Register it in constructor options or before destruction with `carousel.use(createProgressPlugin())`. `getPlugin(name)` returns the installed public plugin object.
+The frozen context exposes owned event subscriptions, navigation commands, read-only state and resolved options, live DOM getters, position methods for gesture/effect plugins, and `refreshLayout()`. Context subscriptions are removed automatically. The plugin must still release its own DOM, global listeners, observers, timers, animation frames, object URLs, and third-party instances in `destroy()`.
 
-### Plugin context
-
-The frozen context provides:
-
-- owned `on`, `once`, and typed `emit` event methods;
-- `next`, `prev`, `goTo`, drag navigation, and snap-back commands;
-- read-only slide, index, loop, layout, and resolved-option queries;
-- live root, viewport, track, and slide-element getters;
-- position/loop-engine methods intended for gesture and visual-effect plugins;
-- `refreshLayout()` after a plugin changes relevant DOM measurements.
-
-Subscriptions created through `context.on()` and `context.once()` are removed automatically if installation fails or the carousel is destroyed. A plugin must still remove its DOM, global event listeners, observers, timers, animation frames, object URLs, and third-party instances in `destroy()`.
-
-### Authoring rules
-
-- Do not retain the `Carousel` instance; use the capability-limited context.
-- Treat context arrays, slide objects, and `options` as read-only snapshots/views.
-- Keep plugin names unique within one carousel.
-- Create a fresh plugin object for each concurrently active carousel.
-- Make `destroy()` safe after partial installation and safe to call once after normal installation.
-- Cancel pointer work and animation frames before releasing referenced DOM.
-- Sanitize untrusted strings before assigning HTML; prefer `textContent` and DOM factories.
+If `install()` throws, the carousel rolls back context subscriptions and invokes the plugin cleanup. Make `destroy()` safe after partial installation.
 
 ## Security boundary
 
-String `slide.content` and custom arrow HTML are trusted developer configuration and are assigned as HTML. Use an `HTMLElement` or a render function for untrusted data, or sanitize it before passing it to the library.
+String `slide.content` and custom arrow HTML are inserted as HTML. They must contain trusted developer-controlled markup. For user-controlled content, build an element with `textContent` or sanitize the value before passing it to the carousel.
 
-The current package version is `1.0.0`. It is ESM, depends on `@shelamkoff/event-bus`, and is released under the MIT License.
+## Demo
+
+From this package directory:
+
+```bash
+npm install
+npm run demo
+```
+
+Or from the workspace root:
+
+```bash
+npm run demo:carousel
+```
+
+Open `http://127.0.0.1:4173/carousel/demo.html`. The demo covers basic navigation, responsive multi-slide layout, loop and autoplay, fade, thumbnails, custom themes, and fixed scroll steps.
+
+## Package exports
+
+- `@shelamkoff/carousel` — JavaScript API and TypeScript declarations.
+- `@shelamkoff/carousel/styles.css` — required carousel styles.
+- `@shelamkoff/carousel/package.json` — package metadata.
+
+## License
+
+MIT.
