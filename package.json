@@ -1,7 +1,7 @@
 {
   "name": "@shelamkoff/carousel",
   "version": "1.0.0",
-  "description": "Position-first framework-agnostic carousel with composable plugins",
+  "description": "Framework-agnostic JavaScript carousel and slider with responsive layouts, loop mode, touch gestures, animations, accessibility, and composable plugins",
   "type": "module",
   "sideEffects": ["**/*.css"],
   "exports": {
@@ -15,13 +15,29 @@
   "files": ["dist", "README.md", "README.ru.md", "LICENSE"],
   "scripts": {
     "build": "node scripts/build-package.mjs",
-    "demo": "node ../scripts/dev-server.mjs /carousel/demo.html",
+    "demo": "node scripts/dev-server.mjs /demo.html",
     "test": "node --test",
     "prepublishOnly": "npm test",
     "prepack": "npm run build"
   },
   "dependencies": { "@shelamkoff/event-bus": "^1.0.0" },
-  "keywords": ["carousel", "slider", "plugins", "framework-agnostic", "esm"],
+  "keywords": [
+    "javascript",
+    "carousel",
+    "slider",
+    "image-carousel",
+    "responsive",
+    "touch",
+    "swipe",
+    "autoplay",
+    "thumbnails",
+    "parallax",
+    "accessibility",
+    "plugins",
+    "vanilla-js",
+    "framework-agnostic",
+    "esm"
+  ],
   "author": "Shelamkoff",
   "engines": { "node": ">=20" },
   "license": "MIT",
@@ -29,7 +45,7 @@
     "type": "git",
     "url": "git+https://github.com/Shelamkoff/carousel.git"
   },
-  "homepage": "https://github.com/Shelamkoff/carousel#readme",
+  "homepage": "https://shelamkoff.github.io/carousel/",
   "bugs": { "url": "https://github.com/Shelamkoff/carousel/issues" },
   "publishConfig": {
     "access": "public",

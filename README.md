@@ -1,8 +1,19 @@
 # @shelamkoff/carousel
 
-Framework-agnostic, position-based carousel with responsive layouts, loop mode, cancellable transitions, typed events, and composable plugins. Version `1.0.0` is an ESM package for modern browsers.
+[![npm version](https://img.shields.io/npm/v/%40shelamkoff%2Fcarousel)](https://www.npmjs.com/package/@shelamkoff/carousel)
+[![Live demo](https://img.shields.io/badge/demo-live-4357b4)](https://shelamkoff.github.io/carousel/)
+[![MIT license](https://img.shields.io/badge/license-MIT-2ea44f)](./LICENSE)
 
-[Русская версия](./README.ru.md)
+Framework-agnostic, position-based carousel and slider with responsive layouts, loop mode, cancellable transitions, typed events, touch gestures, accessibility, and composable plugins. Published as an ESM package for modern browsers.
+
+[Live demo](https://shelamkoff.github.io/carousel/) · [npm](https://www.npmjs.com/package/@shelamkoff/carousel) · [Русская версия](./README.ru.md)
+
+## Highlights
+
+- Responsive single- and multi-slide layouts with fixed or automatic scroll steps.
+- Loop mode, cancellable transitions, keyboard control, touch and mouse gestures.
+- Arrows, dots, thumbnails, autoplay, lazy loading, swipe, and parallax plugins.
+- Framework-independent lifecycle, typed events, and TypeScript declarations.
 
 ## Installation
 
@@ -150,14 +161,14 @@ Rendering and lazy-load failures are isolated to the affected slide and reported
 
 ## Built-in plugins
 
-- [Arrows](dist/src/plugins/arrows/README.md) — previous and next buttons; edge hiding is enabled by default.
-- [Dots](dist/src/plugins/dots/README.md) — clickable pagination.
-- [Thumbnails](dist/src/plugins/thumbnails/README.md) — bottom or side thumbnail navigation.
-- [Keyboard](dist/src/plugins/keyboard/README.md) — focus-scoped arrow keys by default; document-wide handling is opt-in.
-- [Swipe](dist/src/plugins/swipe/README.md) — touch, pointer, resistance, and optional mouse drag.
-- [Autoplay](dist/src/plugins/autoplay/README.md) — interval playback with hover and interaction pausing.
-- [Lazy load](dist/src/plugins/lazyload/README.md) — observer-based image loading and configurable preloading.
-- [Parallax](dist/src/plugins/parallax/README.md) — position-driven visual offset.
+- [Arrows](src/plugins/arrows/README.md) — previous and next buttons; edge hiding is enabled by default.
+- [Dots](src/plugins/dots/README.md) — clickable pagination.
+- [Thumbnails](src/plugins/thumbnails/README.md) — bottom or side thumbnail navigation.
+- [Keyboard](src/plugins/keyboard/README.md) — focus-scoped arrow keys by default; document-wide handling is opt-in.
+- [Swipe](src/plugins/swipe/README.md) — touch, pointer, resistance, and optional mouse drag.
+- [Autoplay](src/plugins/autoplay/README.md) — interval playback with hover and interaction pausing.
+- [Lazy load](src/plugins/lazyload/README.md) — observer-based image loading and configurable preloading.
+- [Parallax](src/plugins/parallax/README.md) — position-driven visual offset.
 
 Install a plugin in `plugins` or with `use()` before destroying the carousel. A stateful plugin instance may belong to only one live carousel; create a fresh plugin object for every concurrent carousel.
 
@@ -205,20 +216,16 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-From this package directory:
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, loop and autoplay, fade, thumbnails, parallax, custom themes, and fixed scroll steps.
+
+To run the same demo locally:
 
 ```bash
 npm install
 npm run demo
 ```
 
-Or from the workspace root:
-
-```bash
-npm run demo:carousel
-```
-
-Open `http://127.0.0.1:4173/carousel/demo.html`. The demo covers basic navigation, responsive multi-slide layout, loop and autoplay, fade, thumbnails, custom themes, and fixed scroll steps.
+Open `http://127.0.0.1:4173/demo.html`.
 
 ## Package exports
 
