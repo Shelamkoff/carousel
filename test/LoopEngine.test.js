@@ -10,7 +10,7 @@ function slides(count, copies = 0) {
 }
 
 function positions(nodes) {
-  return nodes.map(node => Number(node.style.transform.match(/translate3d\\((-?[\\d.]+)px/)?.[1]))
+  return nodes.map(node => Number(node.style.transform.match(/translate3d\((-?[\d.]+)px/)?.[1]))
 }
 
 function assertFilled(nodes, viewWidth, slideWidth) {
