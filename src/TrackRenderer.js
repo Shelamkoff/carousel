@@ -42,7 +42,7 @@ export class TrackRenderer {
   /**
    * @param {HTMLElement} container
    * @param {import('./types').SlideData[]} slides
-   * @param {{ slidesPerView: number, gap: number, loop?: boolean }} layout
+   * @param {{ slidesPerView: number, gap: number, loop?: boolean, ariaLabel?: string }} layout
    */
   build(container, slides, layout) {
     this.destroy()
@@ -52,6 +52,7 @@ export class TrackRenderer {
     root.className = 'carousel' + (this.#isLoop ? ' carousel--loop' : '')
     root.setAttribute('role', 'region')
     root.setAttribute('aria-roledescription', 'carousel')
+    root.setAttribute('aria-label', layout.ariaLabel ?? 'Carousel')
 
     const viewport = document.createElement('div')
     viewport.className = 'carousel__viewport'
@@ -203,6 +204,7 @@ export class TrackRenderer {
     if (!this.#viewport || !this.#track) return
     this.#slidesPerView = slidesPerView
     this.#gap = gap
+    this.#root?.style.setProperty('--carousel-gap', gap + 'px')
     // Non-loop: flex gap for spacing. Loop: gap handled by LoopEngine step.
     this.#track.style.gap = this.#isLoop ? '' : gap + 'px'
     this.#recalcSlideWidth()
@@ -304,7 +306,7 @@ export class TrackRenderer {
     if (this.#track) this.#track.style.transition = 'none'
   }
 
-  /** @param {import('./types').SlideData[]} slides @param {{ slidesPerView: number, gap: number, loop?: boolean }} layout */
+  /** @param {import('./types').SlideData[]} slides @param {{ slidesPerView: number, gap: number, loop?: boolean, ariaLabel?: string }} layout */
   rebuild(slides, layout) {
     if (!this.#track) return
     this.#slideResizeObserver?.disconnect()
@@ -312,6 +314,7 @@ export class TrackRenderer {
     this.#configureCopies(0) // discard old visual copies
     this.#isLoop = layout.loop ?? false
     this.#root?.classList.toggle('carousel--loop', this.#isLoop)
+    this.#root?.setAttribute('aria-label', layout.ariaLabel ?? 'Carousel')
 
     // Reuse the original DOM nodes for unchanged SlideData objects.
     // A breakpoint change must not wipe focus, input state or listeners.

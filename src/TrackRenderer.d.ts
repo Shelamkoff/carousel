@@ -1,7 +1,7 @@
 import type { SlideData } from './types.js'
 
 export class TrackRenderer {
-  build(container: HTMLElement, slides: SlideData[], layout: { slidesPerView: number; gap: number; loop?: boolean }): { root: HTMLElement; viewport: HTMLElement; track: HTMLElement }
+  build(container: HTMLElement, slides: SlideData[], layout: { slidesPerView: number; gap: number; loop?: boolean; ariaLabel?: string }): { root: HTMLElement; viewport: HTMLElement; track: HTMLElement }
   onResize(callback: (previousSlideWidth: number) => void): void
   onRenderError(callback: (index: number, error: Error) => void): void
   renderSlide(trackIndex: number, slide: SlideData): boolean
@@ -14,7 +14,7 @@ export class TrackRenderer {
   setPosition(offset: number): void
   animateTo(targetOffset: number, duration: number, onComplete?: () => void): void
   stopAnimation(): void
-  rebuild(slides: SlideData[], layout: { slidesPerView: number; gap: number; loop?: boolean }): void
+  rebuild(slides: SlideData[], layout: { slidesPerView: number; gap: number; loop?: boolean; ariaLabel?: string }): void
   getRoot(): HTMLElement | null
   getViewport(): HTMLElement | null
   getTrack(): HTMLElement | null

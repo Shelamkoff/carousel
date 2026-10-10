@@ -15,6 +15,7 @@ const DEFAULTS = {
   transitionDuration: 400,
   loop: false,
   startIndex: 0,
+  ariaLabel: 'Carousel',
 }
 
 function validateResolvedOptions(options) {
@@ -39,6 +40,9 @@ function validateResolvedOptions(options) {
   }
   if (typeof options.loop !== 'boolean') {
     throw new TypeError('Carousel: loop must be a boolean')
+  }
+  if (typeof options.ariaLabel !== 'string' || !options.ariaLabel.trim()) {
+    throw new TypeError('Carousel: ariaLabel must be a non-empty string')
   }
   return options
 }
@@ -186,6 +190,7 @@ export class Carousel {
       slidesPerView: opts.slidesPerView ?? 1,
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
+      ariaLabel: opts.ariaLabel,
     })
     this.#initLoop()
     const count = this.#slideManager.getSlideCount()
@@ -228,6 +233,13 @@ export class Carousel {
   #perScroll() {
     const raw = this.#resolvedOptions.slidesPerScroll ?? 1
     return raw === 'auto' ? Math.max(1, Math.floor(this.#resolvedOptions.slidesPerView ?? 1)) : raw
+  }
+
+  /** Respect reduced-motion preferences without changing configured durations. */
+  #duration() {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+      ? 0
+      : this.#resolvedOptions.transitionDuration ?? 400
   }
 
   #initLoop() {
@@ -278,6 +290,7 @@ export class Carousel {
       slidesPerView: opts.slidesPerView ?? 1,
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
+      ariaLabel: opts.ariaLabel,
     })
     this.#initLoop()
     this.#position = oldIdx * this.#step()
@@ -394,7 +407,7 @@ export class Carousel {
         const targetPos = this.#loop
           ? this.#position + this.#loop.shortestDelta(this.#position, logical)
           : logical * this.#step()
-        this.#animateSnapBack(targetPos, this.#resolvedOptions.transitionDuration ?? 400)
+        this.#animateSnapBack(targetPos, this.#duration())
       },
 
       // Cancel animation without re-rendering (slides stay where rAF left them)
@@ -507,7 +520,7 @@ export class Carousel {
           ? this.#loop.shortestDelta(this.#position, index)
           : index * this.#step() - this.#position
         if (Math.abs(delta) > 0.01) {
-          this.#animateSnapBack(this.#position + delta, this.#resolvedOptions.transitionDuration ?? 400)
+          this.#animateSnapBack(this.#position + delta, this.#duration())
         }
       }
       return
@@ -534,7 +547,7 @@ export class Carousel {
           Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1)) * this.#step(),
         )
 
-    const duration = this.#resolvedOptions.transitionDuration ?? 400
+    const duration = this.#duration()
     this.#selectedIndex = index
     if (this.#resolvedOptions.transition === 'fade' && (this.#resolvedOptions.slidesPerView ?? 1) <= 1) {
       this.#position = targetPos
@@ -553,6 +566,11 @@ export class Carousel {
    */
   #performFade(fromIdx, toIdx, targetPos, duration) {
     this.#animating = true
+    if (duration <= 0) {
+      this.#render()
+      this.#onAnimationComplete()
+      return
+    }
 
     // Fade is not compatible with multi-slide view
     if ((this.#resolvedOptions.slidesPerView ?? 1) > 1) {
@@ -755,6 +773,7 @@ export class Carousel {
       slidesPerView: opts.slidesPerView ?? 1,
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
+      ariaLabel: opts.ariaLabel,
     })
     this.#initLoop()
     const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)

@@ -11,7 +11,7 @@ import { createAutoplay } from '../src/plugins/autoplay.js'
 class Element {
   constructor(tag = 'div') {
     this.tagName = tag.toUpperCase()
-    this.style = { touchAction: '' }
+    this.style = { touchAction: '', setProperty(name, value) { this[name] = value } }
     this.dataset = {}
     this.attributes = new Map()
     this.nodes = []
@@ -341,6 +341,34 @@ test('loop replicas never replace the interactive original in view', () => {
   original.dispatchEvent({ type: 'click' })
   assert.equal(clicked, true)
   carousel.destroy()
+})
+
+test('accessible region names update and CSS gap matches the layout', () => {
+  const { carousel, host } = mount(300, 4, {
+    ariaLabel: 'Featured products', gap: 12, transitionDuration: 0,
+  })
+  assert.equal(host.children[0].getAttribute('aria-label'), 'Featured products')
+  assert.equal(host.children[0].style['--carousel-gap'], '12px')
+  carousel.update({ ariaLabel: 'New arrivals', gap: 18 })
+  assert.equal(host.children[0].getAttribute('aria-label'), 'New arrivals')
+  assert.equal(host.children[0].style['--carousel-gap'], '18px')
+  carousel.destroy()
+})
+
+test('reduced motion preferences suppress positional animations', () => {
+  const originalMatchMedia = window.matchMedia
+  window.matchMedia = query => ({
+    matches: query.includes('prefers-reduced-motion'),
+    addEventListener() {}, removeEventListener() {},
+  })
+  try {
+    const { carousel } = mount(100, 4, { transitionDuration: 400 })
+    carousel.next()
+    assert.equal(carousel.getIndex(), 1)
+    carousel.destroy()
+  } finally {
+    window.matchMedia = originalMatchMedia
+  }
 })
 
 test.after(() => { globalThis.performance = originalPerformance })

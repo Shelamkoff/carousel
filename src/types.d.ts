@@ -75,6 +75,7 @@ export interface CarouselOptions {
   transitionDuration?: number
   loop?: boolean
   startIndex?: number
+  ariaLabel?: string
   breakpoints?: Record<number, Partial<CarouselResponsiveOptions>>
   plugins?: CarouselPlugin[]
 }
