@@ -52,7 +52,9 @@ export interface PluginContext {
   getViewport(): HTMLElement | null
   getTrack(): HTMLElement | null
   getSlideElements(): HTMLElement[]
+  getVisualElements(): HTMLElement[]
   getSlideElement(index: number): HTMLElement | null
+  renderSlide(index: number): boolean
   refreshLayout(): void
 }
 

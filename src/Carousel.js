@@ -163,10 +163,10 @@ export class Carousel {
     try {
       this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
       this.#breakpointManager.onChange(() => this.#handleBreakpointChange())
-      this.#buildDOM()
       this.#trackRenderer.onRenderError((index, error) => {
         this.#events.emit('slide:error', { index, error })
       })
+      this.#buildDOM()
 
       if (options.plugins) {
         for (const plugin of options.plugins) this.use(plugin)
@@ -409,13 +409,27 @@ export class Carousel {
       getSlidesPerScroll: () => this.#perScroll(),
       isLoop: () => this.#resolvedOptions.loop ?? false,
 
-      options: new Proxy({}, { get: (_, p) => this.#resolvedOptions[p] }),
+      options: new Proxy({}, {
+        get: (_, key) => this.#resolvedOptions[key],
+        ownKeys: () => Reflect.ownKeys(this.#resolvedOptions),
+        getOwnPropertyDescriptor: (_, key) => Object.prototype.hasOwnProperty.call(this.#resolvedOptions, key)
+          ? { configurable: true, enumerable: true, value: this.#resolvedOptions[key], writable: false }
+          : undefined,
+        set: () => false,
+        deleteProperty: () => false,
+        defineProperty: () => false,
+      }),
 
       getRoot: () => this.#trackRenderer.getRoot(),
       getViewport: () => this.#trackRenderer.getViewport(),
       getTrack: () => this.#trackRenderer.getTrack(),
       getSlideElements: () => [...this.#trackRenderer.getSlideElements()],
+      getVisualElements: () => this.#trackRenderer.getPositionElements(),
       getSlideElement: (i) => this.#trackRenderer.getSlideElement(i),
+      renderSlide: (i) => {
+        const slide = this.#slideManager.getSlide(i)
+        return !!slide && this.#trackRenderer.renderSlide(i, slide)
+      },
       refreshLayout: () => this.#trackRenderer.refreshLayout(),
     })
     return {

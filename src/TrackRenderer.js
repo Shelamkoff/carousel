@@ -166,6 +166,7 @@ export class TrackRenderer {
   #renderContent(el, slide, index) {
     el.classList.remove('carousel__slide--error')
     delete el.dataset.rendered
+    el.replaceChildren()
     try {
       if (typeof slide.content === 'string') el.innerHTML = slide.content
       else if (slide.content instanceof HTMLElement) el.appendChild(slide.content.cloneNode(true))
@@ -176,6 +177,7 @@ export class TrackRenderer {
       }
       el.dataset.rendered = 'true'
     } catch (error) {
+      el.replaceChildren()
       const normalized = error instanceof Error ? error : new Error(String(error))
       el.dataset.rendered = 'error'
       el.classList.add('carousel__slide--error')

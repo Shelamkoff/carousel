@@ -2,6 +2,8 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { Carousel } from '../src/Carousel.js'
 import { createSwipe } from '../src/plugins/swipe.js'
+import { createParallax } from '../src/plugins/parallax.js'
+import { createLazyLoad } from '../src/plugins/lazyload.js'
 
 class Element {
   constructor(tag = 'div') {
@@ -87,7 +89,16 @@ class Element {
   closest() { return null }
   setPointerCapture() {}
   releasePointerCapture() {}
-  querySelector() { return null }
+  querySelector(selector) {
+    if (!selector.startsWith('.')) return null
+    const className = selector.slice(1)
+    for (const child of this.nodes) {
+      if (child.classList.contains(className)) return child
+      const nested = child.querySelector(selector)
+      if (nested) return nested
+    }
+    return null
+  }
 }
 
 const clock = { now: 0, next: 0, frames: new Map() }
@@ -96,6 +107,7 @@ globalThis.document = { createElement: tag => new Element(tag), querySelector: (
 globalThis.window = new Element('window')
 globalThis.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
 globalThis.ResizeObserver = class { observe() {} disconnect() {} }
+globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} }
 const originalPerformance = globalThis.performance
 globalThis.performance = { now: () => clock.now }
 globalThis.requestAnimationFrame = callback => {
@@ -196,6 +208,46 @@ test('multi-slide fade fallback animates instead of teleporting', () => {
   assert.equal(carousel.getIndex(), 0)
   frame(20)
   assert.ok(track.style.transform.includes('translate3d(-'))
+  carousel.destroy()
+})
+
+test('lazyload and parallax agree on the same renderer and retain layer wrappers', () => {
+  const host = new Element()
+  host.width = 200
+  const slides = Array.from({ length: 4 }, (_, index) => ({
+    lazy: true,
+    content: () => {
+      const node = new Element('section')
+      node.dataset.slide = String(index)
+      return node
+    },
+  }))
+  const carousel = new Carousel(host, slides, {
+    loop: true,
+    slidesPerView: 2,
+    transitionDuration: 0,
+    plugins: [createParallax(), createLazyLoad({ preload: 0 })],
+  })
+  const track = host.children[0].children[0].children[0]
+  assert.equal(track.children[0].dataset.loaded, 'true')
+  assert.ok(track.children[0].querySelector('.carousel__parallax__layer'))
+  carousel.next()
+  assert.equal(track.children[1].dataset.loaded, 'true')
+  assert.ok(track.children[1].querySelector('.carousel__parallax__layer'))
+  assert.equal(track.children[1].querySelector('.carousel__parallax__layer').children.length, 1)
+  carousel.destroy()
+})
+
+test('the plugin options proxy enumerates live resolved options and stays read-only', () => {
+  const plugin = {
+    name: 'options-test',
+    install(context) { this.options = context.options },
+  }
+  const { carousel } = mount(200, 3, { plugins: [plugin] })
+  assert.equal({ ...plugin.options }.slidesPerView, 1)
+  carousel.update({ slidesPerView: 2 })
+  assert.equal({ ...plugin.options }.slidesPerView, 2)
+  assert.throws(() => { plugin.options.gap = 8 }, TypeError)
   carousel.destroy()
 })
 

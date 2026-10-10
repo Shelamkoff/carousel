@@ -21,6 +21,8 @@ export function createParallax(options = {}) {
   let tweenFactor = 0
   /** @type {boolean} */
   let running = false
+  let transitioning = false
+  let settleRafId = 0
 
   const factor = options.factor ?? 0.2
   if (!Number.isFinite(factor)) throw new TypeError('Carousel parallax factor must be finite')
@@ -28,8 +30,8 @@ export function createParallax(options = {}) {
 
   function wrapSlides() {
     if (!ctx) return
-    const slides = ctx.getSlideElements()
-    tweenFactor = factorBase * slides.length
+    const slides = ctx.getVisualElements()
+    tweenFactor = factorBase * ctx.getSlideCount()
 
     layers = slides.map(slide => {
       let parallax = slide.querySelector('.carousel__parallax')
@@ -47,7 +49,7 @@ export function createParallax(options = {}) {
   }
 
   function unwrapSlides() {
-    const slides = ctx?.getSlideElements() ?? []
+    const slides = ctx?.getVisualElements() ?? []
     for (let i = 0; i < slides.length; i++) {
       const parallax = slides[i]?.querySelector('.carousel__parallax')
       if (!parallax) continue
@@ -60,21 +62,10 @@ export function createParallax(options = {}) {
     layers = []
   }
 
-  /**
-   * Get current visual position (accounts for CSS transition interpolation).
-   * @returns {number}
-   */
+  // All transitions now use the core's position-based rAF clock.
+  // No computed-style reads or DOMMatrix reconstruction are necessary.
   function getVisualPosition() {
-    if (!ctx) return 0
-    if (ctx.isLoop()) return ctx.getPosition()
-
-    // Non-loop: CSS transition interpolates transform, read computed value
-    const track = ctx.getTrack()
-    if (!track) return 0
-    const cs = getComputedStyle(track)
-    if (!cs.transform || cs.transform === 'none') return 0
-    const m = new DOMMatrix(cs.transform)
-    return -m.m41
+    return ctx?.getPosition() ?? 0
   }
 
   function update() {
@@ -87,20 +78,22 @@ export function createParallax(options = {}) {
 
     const engine = ctx.getLoopEngine()
     const pos = getVisualPosition()
-    const count = layers.length
+    const count = ctx.getSlideCount()
+    const visualSlides = ctx.getVisualElements()
+    if (count === 0) { running = false; rafId = 0; return }
 
     for (let i = 0; i < layers.length; i++) {
       if (!layers[i]) continue
-      const slide = ctx.getSlideElement(i)
+      const slide = visualSlides[i]
       if (!slide) continue
 
       let diffToTarget
       if (engine) {
-        // Loop: read slide's computed transform for its visual position
-        const cs = getComputedStyle(slide)
-        if (!cs.transform || cs.transform === 'none') { layers[i].style.transform = ''; continue }
-        const m = new DOMMatrix(cs.transform)
-        diffToTarget = m.m41 / step / count
+        // LoopEngine provides the inline translated position of each slot.
+        // Reading it avoids forced style/layout calculations on every frame.
+        const offset = Number.parseFloat(slide.style.transform.slice('translate3d('.length))
+        if (!Number.isFinite(offset)) { layers[i].style.transform = ''; continue }
+        diffToTarget = offset / step / count
       } else {
         // Non-loop: normalized distance from viewport
         diffToTarget = (i * step - pos) / step / count
@@ -135,6 +128,24 @@ export function createParallax(options = {}) {
     update()
   }
 
+  // snapBack() intentionally emits no transition events. After pointerup,
+  // keep updating the effect until the position has stopped changing.
+  function settleWhenIdle() {
+    if (settleRafId) cancelAnimationFrame(settleRafId)
+    let last = ctx?.getPosition() ?? 0
+    let stableFrames = 0
+    const check = () => {
+      settleRafId = 0
+      if (!ctx || transitioning) return
+      const position = ctx.getPosition()
+      stableFrames = Math.abs(position - last) < 0.001 ? stableFrames + 1 : 0
+      last = position
+      if (stableFrames >= 2) { stopLoop(); return }
+      settleRafId = requestAnimationFrame(check)
+    }
+    settleRafId = requestAnimationFrame(check)
+  }
+
   return {
     name: 'parallax',
 
@@ -147,8 +158,9 @@ export function createParallax(options = {}) {
 
       unsubs.push(
         // Slide/fade transitions
-        context.on('transition:start', startLoop),
-        context.on('transition:end', stopLoop),
+        context.on('transition:start', () => { transitioning = true; startLoop() }),
+        context.on('transition:end', () => { transitioning = false; stopLoop() }),
+        context.on('slide:lazyload', () => { wrapSlides(); update() }),
         // Rebuild after breakpoint change — rewrap new DOM elements
         context.on('resize', () => {
           if (!ctx) return
@@ -162,16 +174,8 @@ export function createParallax(options = {}) {
       // We hook into pointer events on the viewport to drive the rAF loop during drag.
       const viewport = context.getViewport()
       if (viewport) {
-        const onPointerDown = () => startLoop()
-        const onPointerUp = () => {
-          // Small delay: let snapBack/goToAfterDrag start transition:start before we stop
-          requestAnimationFrame(() => {
-            if (!running) return
-            // If transition:start already fired, it will keep the loop running.
-            // Otherwise stop.
-            stopLoop()
-          })
-        }
+        const onPointerDown = () => { transitioning = false; startLoop() }
+        const onPointerUp = () => settleWhenIdle()
         viewport.addEventListener('pointerdown', onPointerDown)
         window.addEventListener('pointerup', onPointerUp)
         window.addEventListener('pointercancel', onPointerUp)
@@ -186,6 +190,8 @@ export function createParallax(options = {}) {
 
     destroy() {
       running = false
+      transitioning = false
+      if (settleRafId) { cancelAnimationFrame(settleRafId); settleRafId = 0 }
       if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
       unsubs.forEach(fn => fn())
       unsubs = []

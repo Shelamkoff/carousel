@@ -31,26 +31,20 @@ export function createLazyLoad(options = {}) {
    * @param {number} idx
    */
   function loadSlide(el, idx) {
-    if (el.dataset.loaded === 'true') return
-    const slides = ctx?.getSlides()
-    const slide = slides?.[idx]
-    if (!slide) return
+    if (!ctx || el !== ctx.getSlideElement(idx)) return
+    if (el.dataset.loaded === 'true' || el.dataset.loaded === 'error') return
+    if (!ctx.getSlide(idx)) return
 
-    try {
-      if (typeof slide.content === 'string') el.innerHTML = slide.content
-      else if (slide.content instanceof HTMLElement) el.appendChild(slide.content.cloneNode(true))
-      else if (typeof slide.content === 'function') el.appendChild(slide.content())
-    } catch (error) {
-      const normalized = error instanceof Error ? error : new Error(String(error))
+    // The core renderer owns content insertion, validation and error events.
+    // Plugins must not reimplement markup rendering independently.
+    if (!ctx.renderSlide(idx)) {
       el.dataset.loaded = 'error'
-      ctx?.emit('slide:error', { index: idx, error: normalized })
       return
     }
 
     el.dataset.loaded = 'true'
     el.classList.add('carousel__slide--loaded')
-    ctx?.refreshLayout()
-    ctx?.emit('slide:lazyload', { index: idx, element: el })
+    ctx.emit('slide:lazyload', { index: idx, element: el })
   }
 
   function preloadAdjacent() {
@@ -114,6 +108,7 @@ export function createLazyLoad(options = {}) {
         context.on('resize', () => {
           observer?.disconnect()
           observeLazySlides()
+          preloadAdjacent()
         }),
       )
     },
