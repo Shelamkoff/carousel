@@ -104,7 +104,8 @@ export class TrackRenderer {
     this.#copies = []
     if (!this.#isLoop || !this.#track) return
     const count = this.#slideElements.length
-    if (count === 0 || count > perView) return
+    // Fractional views still need one extra wrap slot while dragging.
+    if (count === 0 || count > Math.ceil(perView)) return
     const cycles = Math.ceil(perView / count)
     for (let cycle = 1; cycle <= cycles; cycle++) {
       for (let i = 0; i < count; i++) {

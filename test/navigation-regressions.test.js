@@ -445,4 +445,27 @@ test('breakpoint options reject nested breakpoint overrides', () => {
   )
 })
 
+test('fractional multi-slide loops keep the viewport filled during wraparound', () => {
+  const { carousel, track } = mount(300, 3, {
+    loop: true,
+    slidesPerView: 2.5,
+    transitionDuration: 0,
+  })
+  assert.equal(track.children.length, 6)
+  const logical = {
+    name: 'layout-position-probe',
+    install(ctx) { this.ctx = ctx },
+  }
+  carousel.use(logical)
+  // Three 120px slides: moving 359px requires a second rendering of the
+  // first visible slide to cover the rightmost 59px of the viewport.
+  logical.ctx.setPositionDrag(359)
+  const xs = track.children.map(el => Number.parseFloat(el.style.transform.slice(12)))
+  for (let px = 0.5; px < 300; px += 1) {
+    assert.ok(xs.some(x => x <= px && x + 120 >= px),
+      'Uncovered pixel at ' + px + ' with slots ' + xs)
+  }
+  carousel.destroy()
+})
+
 test.after(() => { globalThis.performance = originalPerformance })
