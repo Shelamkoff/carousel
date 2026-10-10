@@ -90,7 +90,7 @@ interface SlideData {
 ```
 
 - A render function is the safest choice for dynamic or untrusted data.
-- An `HTMLElement` is moved into the carousel; it is not cloned.
+- An `HTMLElement` is **cloned** into the carousel with `cloneNode(true)`; listeners registered on the original element are not copied. Use a render function to attach interactive behavior to each rendered element.
 - A string is assigned as HTML and is therefore trusted developer input.
 - `thumb` is consumed by the thumbnails plugin, `lazy` by lazy loading, and `meta` remains application-owned metadata.
 
@@ -103,12 +103,13 @@ interface SlideData {
 | `gap` | `number` | `0` | Gap between slides in CSS pixels. |
 | `transition` | `'slide' \| 'fade'` | `'slide'` | Movement strategy. Fade mode displays one slide at a time. |
 | `transitionDuration` | `number` | `400` | Transition duration in milliseconds. |
-| `loop` | `boolean` | `false` | Enables circular navigation using loop clones. |
+| `loop` | `boolean` | `false` | Circular navigation using positioned originals. In short loops only, inert visual replicas fill the viewport. |
 | `startIndex` | `number` | `0` | Initial logical slide index. Used only during construction. |
+| `ariaLabel` | `string` | `'Carousel'` | Accessible name for the carousel region. |
 | `breakpoints` | `Record<number, Partial<CarouselResponsiveOptions>>` | none | Options applied when the viewport is at least the numeric width. |
 | `plugins` | `CarouselPlugin[]` | `[]` | Plugins installed during construction. |
 
-Breakpoint values override base options. The carousel preserves the current logical slide, cancels obsolete animation work, and rebuilds layout when the active breakpoint changes.
+Breakpoint values override base options. The carousel retains existing slide DOM nodes on breakpoint changes and when inserting/removing neighboring slides; an explicit `update()` re-renders slide content (including render callbacks). This makes breakpoint updates less disruptive, while `update()` can replace descendant nodes. Animations are disabled when the user prefers reduced motion (`prefers-reduced-motion: reduce`).
 
 ```js
 const carousel = new Carousel('#gallery', slides, {
@@ -129,8 +130,8 @@ const carousel = new Carousel('#gallery', slides, {
 | `getPlugin(name)` | plugin or `undefined` | Returns the installed public plugin object. |
 | `next()` / `prev()` | `void` | Moves by the resolved scroll step. |
 | `goTo(index)` | `void` | Navigates to a logical slide index. |
-| `getIndex()` | `number` | Current internal/render index. Prefer `getRealIndex()` in loop mode. |
-| `getRealIndex()` | `number` | Current logical index in the source slide array. |
+| `getIndex()` | `number` | Current logical index (including in loop mode). |
+| `getRealIndex()` | `number` | Alias for `getIndex()`, retained for integrations. |
 | `getSlide(index?)` | slide or `null` | Returns a logical slide; omitting the index returns the current slide. |
 | `getSlides()` | `SlideData[]` | Returns a defensive array copy of slides. |
 | `addSlide(slide, index?)` | `void` | Adds a slide and rebuilds the layout. |
@@ -157,7 +158,7 @@ Do not call methods after `destroy()`. Create a new instance if the host needs t
 | `slide:error` | `{ index, error }` |
 | `destroy` | no payload |
 
-Rendering and lazy-load failures are isolated to the affected slide and reported through `slide:error`.
+Rendering and lazy-load failures are isolated to the affected slide. After construction they are reported through `slide:error`. Initial synchronous render failures are logged to the console because a consumer cannot subscribe until the constructor returns.
 
 ## Built-in plugins
 
@@ -209,6 +210,10 @@ export function createProgressPlugin() {
 The frozen context exposes owned event subscriptions, navigation commands, read-only state and resolved options, live DOM getters, position methods for gesture/effect plugins, and `refreshLayout()`. Context subscriptions are removed automatically. The plugin must still release its own DOM, global listeners, observers, timers, animation frames, object URLs, and third-party instances in `destroy()`.
 
 If `install()` throws, the carousel rolls back context subscriptions and invokes the plugin cleanup. Make `destroy()` safe after partial installation.
+
+## Verification
+
+Run `npm test` for the Node regression suite, `npm run typecheck` for public TypeScript API checks, and `npm run build` for the publishable ESM layout. The separate interactive browser regression page is available at `/tests/browser/lifecycle.html` when running `npm run demo` after installing dependencies. Browser tests are **not** included in `npm test` and require a browser.
 
 ## Security boundary
 
