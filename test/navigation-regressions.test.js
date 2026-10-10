@@ -188,7 +188,7 @@ test('subthreshold drags and pointercancel restore the original slide', () => {
   carousel.destroy()
 })
 
-test('breakpoint-free update preserves DOM nodes and their listeners', () => {
+test('inserting neighboring slides retains live DOM nodes and listeners', () => {
   const { carousel, track } = mount(300, 4, { slidesPerView: 2, transitionDuration: 0 })
   const original = track.children[0]
   const input = new Element('input')
@@ -196,7 +196,7 @@ test('breakpoint-free update preserves DOM nodes and their listeners', () => {
   original.appendChild(input)
   let clicks = 0
   original.addEventListener('click', () => clicks++)
-  carousel.update({ gap: 12 })
+  carousel.addSlide({ content: 'inserted' }, 4)
   assert.equal(track.children[0], original)
   assert.equal(track.children[0].children[0], input)
   original.dispatchEvent({ type: 'click' })
@@ -368,6 +368,49 @@ test('reduced motion preferences suppress positional animations', () => {
     carousel.destroy()
   } finally {
     window.matchMedia = originalMatchMedia
+  }
+})
+
+test('update re-invokes render functions and isolates their errors', () => {
+  const host = new Element()
+  host.width = 200
+  let shouldThrow = false
+  let renderCalls = 0
+  const carousel = new Carousel(host, [{
+    content: () => new Element('span'),
+  }, {
+    content: () => {
+      renderCalls++
+      if (shouldThrow) throw new Error('render failure')
+      return new Element('span')
+    },
+  }], { transitionDuration: 0 })
+  let failures = 0
+  carousel.on('slide:error', ({ index, error }) => {
+    if (index === 1 && error.message === 'render failure') failures++
+  })
+  shouldThrow = true
+  carousel.update({ gap: 1 })
+  assert.equal(renderCalls, 2)
+  assert.equal(failures, 1)
+  carousel.destroy()
+})
+
+test('initial render errors remain observable in console', () => {
+  const original = console.error
+  const messages = []
+  console.error = (...args) => messages.push(args)
+  try {
+    const host = new Element()
+    host.width = 100
+    const carousel = new Carousel(host, [{
+      content: () => { throw new Error('eager render failure') },
+    }], { transitionDuration: 0 })
+    assert.equal(messages.length, 1)
+    assert.equal(messages[0][1].message, 'eager render failure')
+    carousel.destroy()
+  } finally {
+    console.error = original
   }
 })
 

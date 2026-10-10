@@ -168,10 +168,12 @@ export class Carousel {
     try {
       this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
       this.#breakpointManager.onChange(() => this.#handleBreakpointChange())
+      // During initial build consumers cannot subscribe yet, so the renderer
+      // reports eager render failures to console. Later failures use events.
+      this.#buildDOM()
       this.#trackRenderer.onRenderError((index, error) => {
         this.#events.emit('slide:error', { index, error })
       })
-      this.#buildDOM()
 
       if (options.plugins) {
         for (const plugin of options.plugins) this.use(plugin)
@@ -764,7 +766,7 @@ export class Carousel {
     this.#rebuildTrack(index < currentIndex ? currentIndex - 1 : currentIndex)
   }
 
-  #rebuildTrack(index = this.getIndex()) {
+  #rebuildTrack(index = this.getIndex(), refreshContent = false) {
     this.#stopAllAnimations()
     this.#pendingResize = false
     this.#pendingResizeStep = null
@@ -774,7 +776,7 @@ export class Carousel {
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
       ariaLabel: opts.ariaLabel,
-    })
+    }, refreshContent)
     this.#initLoop()
     const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
     this.#position = Math.max(0, idx) * this.#step()
@@ -819,7 +821,7 @@ export class Carousel {
       this.#breakpointManager.updateBase(previousOptions)
       throw error
     }
-    this.#rebuildTrack(currentIndex)
+    this.#rebuildTrack(currentIndex, true)
   }
 
   /* ═══════════════ Events ═══════════════ */

@@ -307,7 +307,7 @@ export class TrackRenderer {
   }
 
   /** @param {import('./types').SlideData[]} slides @param {{ slidesPerView: number, gap: number, loop?: boolean, ariaLabel?: string }} layout */
-  rebuild(slides, layout) {
+  rebuild(slides, layout, refreshContent = false) {
     if (!this.#track) return
     this.#slideResizeObserver?.disconnect()
     this.#slideResizeObserver = null
@@ -328,7 +328,7 @@ export class TrackRenderer {
     const next = slides.map((slide, index) => {
       const previous = pool.get(slide)?.shift()
       const el = previous ? previous.element : this.#createSlide(slide, index, slides.length)
-      if (previous && previous.content !== slide.content) {
+      if (previous && (refreshContent || previous.content !== slide.content)) {
         el.replaceChildren()
         delete el.dataset.rendered
         delete el.dataset.loaded
