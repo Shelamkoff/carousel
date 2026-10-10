@@ -213,7 +213,7 @@ export function createProgressPlugin() {
 
 ## Проверка
 
-`npm test` запускает регрессионные Node-тесты, `npm run typecheck` проверяет публичные типы TypeScript, `npm run build` создаёт структуру ESM-пакета. Отдельная браузерная страница с регрессионными сценариями доступна по адресу `/tests/browser/lifecycle.html` при запущенном `npm run demo` и установленных зависимостях. Она не входит в `npm test` и требует браузера.
+`npm run check` выполняет Node-тесты, проверку публичного TypeScript API и сборку ESM-пакета. Для браузерных тестов установите Chromium командой `npx playwright install chromium` и запустите `npm run test:browser`. GitHub Actions запускает оба набора на каждый push и pull request. Диагностическая страница также доступна по адресу `/tests/browser/lifecycle.html` после `npm run demo`.
 
 ## Граница безопасности
 

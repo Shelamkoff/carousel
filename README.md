@@ -213,7 +213,7 @@ If `install()` throws, the carousel rolls back context subscriptions and invokes
 
 ## Verification
 
-Run `npm test` for the Node regression suite, `npm run typecheck` for public TypeScript API checks, and `npm run build` for the publishable ESM layout. The separate interactive browser regression page is available at `/tests/browser/lifecycle.html` when running `npm run demo` after installing dependencies. Browser tests are **not** included in `npm test` and require a browser.
+Run `npm run check` to execute the Node regression suite, check the public TypeScript API, and build the publishable ESM package. Run `npx playwright install chromium` once, then `npm run test:browser` for Chromium integration tests of the live demo and lifecycle page. GitHub Actions runs both suites on pushes and pull requests. The diagnostic page is also available at `/tests/browser/lifecycle.html` with `npm run demo`.
 
 ## Security boundary
 

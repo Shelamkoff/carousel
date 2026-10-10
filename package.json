@@ -24,6 +24,7 @@
     "build": "node scripts/build-package.mjs",
     "demo": "node scripts/dev-server.mjs /index.html",
     "test": "node --test",
+    "test:browser": "playwright test",
     "typecheck": "tsc -p type-tests/tsconfig.json",
     "check": "npm run test && npm run typecheck && npm run build",
     "prepublishOnly": "npm run check",
@@ -67,6 +68,7 @@
     "registry": "https://registry.npmjs.org/"
   },
   "devDependencies": {
+    "@playwright/test": "^1.56.0",
     "typescript": "5.8.3"
   }
 }
