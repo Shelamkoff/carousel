@@ -1,9 +1,8 @@
 /**
- * Position-first loop engine.
+ * Circular position engine.
  *
- * Each slide gets its FULL position via individual transform.
- * Track transform is NOT used in loop mode.
- * No discrete k*L jumps visible — repositioning only happens off-screen.
+ * Positions are measured in slide steps (slide width + gap). Logical indexes
+ * never refer to visual copies: a copy is only another rendering of a slide.
  */
 export class LoopEngine {
   /** @type {number} */
@@ -13,10 +12,7 @@ export class LoopEngine {
   /** @type {number} */
   #loopLength
 
-  /**
-   * @param {number} count
-   * @param {number} step — slideWidth + gap
-   */
+  /** @param {number} count @param {number} step */
   constructor(count, step) {
     this.#validate(count, step)
     this.#count = count
@@ -32,77 +28,91 @@ export class LoopEngine {
     this.#loopLength = count * step
   }
 
-  /** @returns {number} */
   get step() { return this.#step }
-  /** @returns {number} */
   get loopLength() { return this.#loopLength }
-  /** @returns {number} */
   get count() { return this.#count }
 
-  /**
-   * Normalize to [0, loopLength).
-   * @param {number} pos
-   * @returns {number}
-   */
-  normalize(pos) {
+  /** @param {number} position */
+  normalize(position) {
     if (this.#loopLength <= 0) return 0
-    return ((pos % this.#loopLength) + this.#loopLength) % this.#loopLength
+    return ((position % this.#loopLength) + this.#loopLength) % this.#loopLength
   }
 
-  /**
-   * Position → index (0..N-1).
-   * @param {number} pos
-   * @returns {number}
-   */
-  toIndex(pos) {
+  /** @param {number} position */
+  toIndex(position) {
     if (this.#count === 0 || this.#step <= 0) return 0
-    const norm = this.normalize(pos)
-    return Math.round(norm / this.#step) % this.#count
+    return Math.round(this.normalize(position) / this.#step) % this.#count
   }
 
   /**
-   * Shortest delta from current position to target index.
-   * @param {number} currentPos
+   * Shortest route for explicit goTo() calls. Ties are forward by convention.
+   * @param {number} currentPosition
    * @param {number} targetIndex
-   * @returns {number}
    */
-  shortestDelta(currentPos, targetIndex) {
+  shortestDelta(currentPosition, targetIndex) {
     if (this.#loopLength <= 0) return 0
     const target = targetIndex * this.#step
-    const norm = this.normalize(currentPos)
-    let delta = target - norm
+    const normalized = this.normalize(currentPosition)
+    let delta = target - normalized
     if (delta > this.#loopLength / 2) delta -= this.#loopLength
     if (delta < -this.#loopLength / 2) delta += this.#loopLength
     return delta
   }
 
   /**
-   * Position each slide via its own transform. Track does NOT move.
+   * Preserve the requested direction for next(), prev() and swipes.
+   * The shortest route can otherwise reverse direction for page-sized moves.
+   * @param {number} currentPosition
+   * @param {number} targetIndex
+   * @param {1 | -1} direction
+   */
+  directedDelta(currentPosition, targetIndex, direction) {
+    if (direction !== 1 && direction !== -1) {
+      throw new TypeError('LoopEngine: direction must be 1 or -1')
+    }
+    if (this.#loopLength <= 0) return 0
+    const delta = targetIndex * this.#step - this.normalize(currentPosition)
+    return direction === 1
+      ? ((delta % this.#loopLength) + this.#loopLength) % this.#loopLength
+      : -(((-delta % this.#loopLength) + this.#loopLength) % this.#loopLength)
+  }
+
+  /**
+   * Position logical slides individually; the track never moves.
    *
-   * slide[i].transform = translate3d(x, 0, 0)
-   * where x = i*step - position + k*L
-   * k chosen so x is closest to viewport center.
+   * Without copies, a slide wraps only after leaving the viewport on the
+   * left, not at the midpoint of the loop. This keeps multi-slide layouts
+   * contiguous whenever count > slidesPerView.
    *
-   * When k changes, the slide is already off-screen — jump is invisible.
+   * If the renderer supplies visual copies (data-carousel-copy="1", etc.),
+   * position the copies in successive cycles. They fill layouts where the
+   * entire loop is shorter than the viewport.
    *
    * @param {HTMLElement[]} slides
-   * @param {number} position — raw position (viewport offset in px)
+   * @param {number} position
    */
   positionSlides(slides, position) {
     if (this.#count === 0 || this.#step <= 0) return
-    const L = this.#loopLength
+    const loopLength = this.#loopLength
+    const normalized = this.normalize(position)
+    const hasCopies = slides.some(slide => slide.dataset?.carouselCopy !== undefined)
 
-    for (let i = 0; i < slides.length; i++) {
-      // Natural position of this slide
-      const natural = i * this.#step
-      // Where it would be relative to viewport without wrapping
-      let x = natural - position
-      // Wrap into [-L/2, L/2) range centered on viewport
-      x = x - L * Math.floor((x + L / 2) / L)
-      slides[i].style.transform = `translate3d(${x}px, 0, 0)`
+    for (let index = 0; index < slides.length; index++) {
+      const slide = slides[index]
+      let x
+      if (hasCopies) {
+        const logical = Number(slide.dataset?.index ?? index % this.#count)
+        const copy = Number(slide.dataset?.carouselCopy ?? 0)
+        x = logical * this.#step + copy * loopLength - normalized
+      } else {
+        x = index * this.#step - normalized
+        x -= loopLength * Math.floor((x + this.#step) / loopLength)
+      }
+      slide.style.transform = `translate3d(${x}px, 0, 0)`
     }
   }
 
+  /** @param {number} count @param {number} step */
   #validate(count, step) {
     if (!Number.isInteger(count) || count < 0) {
       throw new RangeError('LoopEngine: count must be a non-negative integer')
