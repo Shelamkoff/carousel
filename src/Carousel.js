@@ -116,9 +116,7 @@ export class Carousel {
   /** @type {number} */
   #rafId = 0
   /** @type {number} */
-  #loopTimer = 0
-  /** @type {(() => void) | null} */
-  #loopFinish = null
+  #animationTimer = 0
   /** @type {number} */
   #fadeTimer = 0
   /** @type {boolean} */
@@ -308,8 +306,7 @@ export class Carousel {
   #stopAllAnimations() {
     this.#navigationEpoch++
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
-    if (this.#loopTimer) { clearTimeout(this.#loopTimer); this.#loopTimer = 0 }
-    this.#loopFinish = null
+    if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
     this.#cancelFade()
     this.#trackRenderer.stopAnimation()
     this.#animating = false
@@ -708,15 +705,13 @@ export class Carousel {
       if (settled) return
       settled = true
       if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
-      if (this.#loopTimer) { clearTimeout(this.#loopTimer); this.#loopTimer = 0 }
-      this.#loopFinish = null
-      this.#position = targetPos
+      if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
+        this.#position = targetPos
       this.#render()
       done()
     }
 
-    this.#loopFinish = finish
-    this.#loopTimer = setTimeout(finish, duration + 60)
+    this.#animationTimer = setTimeout(finish, duration + 60)
     const frame = now => {
       if (settled) return
       const progress = Math.max(0, Math.min((now - startTime) / duration, 1))

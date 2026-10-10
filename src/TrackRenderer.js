@@ -31,9 +31,6 @@ export class TrackRenderer {
   /** @type {((previousSlideWidth: number) => void) | null} */
   #onResize = null
   /** @type {number} */
-  #animTimer = 0
-  /** @type {(() => void) | null} */
-  #onCompleteGuard = null
   /** @type {boolean} */
   #isLoop = false
   /** @type {((index: number, error: Error) => void) | null} */
@@ -275,34 +272,8 @@ export class TrackRenderer {
     this.#track.style.transform = `translate3d(${offset}px, 0, 0)`
   }
 
-  /**
-   * @param {number} targetOffset
-   * @param {number} duration
-   * @param {() => void} [onComplete]
-   */
-  animateTo(targetOffset, duration, onComplete) {
-    if (!this.#track) return
-    this.stopAnimation()
-
-    this.#track.style.transition = `transform ${duration}ms ease`
-    void this.#track.offsetWidth
-    this.#track.style.transform = `translate3d(${targetOffset}px, 0, 0)`
-
-    let completed = false
-    this.#animTimer = setTimeout(() => {
-      if (completed) return
-      completed = true
-      this.#animTimer = 0
-      this.#track.style.transition = 'none'
-      onComplete?.()
-    }, duration + 20)
-
-    this.#onCompleteGuard = () => { completed = true }
-  }
-
+  // Track animations are owned by Carousel's position controller.
   stopAnimation() {
-    if (this.#animTimer) { clearTimeout(this.#animTimer); this.#animTimer = 0 }
-    if (this.#onCompleteGuard) { this.#onCompleteGuard(); this.#onCompleteGuard = null }
     if (this.#track) this.#track.style.transition = 'none'
   }
 

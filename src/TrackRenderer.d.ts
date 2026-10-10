@@ -12,7 +12,6 @@ export class TrackRenderer {
   get gap(): number
   get slidesPerView(): number
   setPosition(offset: number): void
-  animateTo(targetOffset: number, duration: number, onComplete?: () => void): void
   stopAnimation(): void
   rebuild(slides: SlideData[], layout: { slidesPerView: number; gap: number; loop?: boolean; ariaLabel?: string }, refreshContent?: boolean): void
   getRoot(): HTMLElement | null
