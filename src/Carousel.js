@@ -126,6 +126,7 @@ export class Carousel {
   #pendingResizeStep = null
   #plugins = new Map()
   #navigationEpoch = 0
+  #selectedIndex = 0
   #notifying = false
   #queuedNavigation = null
 
@@ -187,7 +188,14 @@ export class Carousel {
       loop: opts.loop ?? false,
     })
     this.#initLoop()
-    this.#position = (opts.startIndex ?? 0) * this.#step()
+    const count = this.#slideManager.getSlideCount()
+    const startIndex = opts.startIndex ?? 0
+    this.#selectedIndex = count === 0
+      ? 0
+      : this.#loop
+        ? startIndex % count
+        : Math.min(startIndex, Math.max(0, Math.ceil(count - (opts.slidesPerView ?? 1))))
+    this.#position = this.#selectedIndex * this.#step()
     this.#render()
 
     this.#trackRenderer.onResize((previousSlideWidth) => {
@@ -202,12 +210,15 @@ export class Carousel {
   }
 
   #applyResize(previousStep = this.#step()) {
-    const idx = this.#loop
-      ? this.#loop.toIndex(this.#position)
-      : (previousStep > 0 ? Math.max(0, Math.round(this.#position / previousStep)) : 0)
+    const idx = previousStep <= 0
+      ? this.#selectedIndex
+      : this.#loop
+        ? this.#loop.toIndex(this.#position)
+        : Math.max(0, Math.round(this.#position / previousStep))
     this.#initLoop()
     this.#position = idx * this.#step()
     this.#render()
+    this.#selectedIndex = this.getIndex()
     this.#pendingResize = false
     this.#pendingResizeStep = null
     this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
@@ -265,7 +276,9 @@ export class Carousel {
     })
     this.#initLoop()
     this.#position = oldIdx * this.#step()
+    this.#selectedIndex = oldIdx
     this.#render()
+    this.#selectedIndex = this.getIndex()
     this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
   }
 
@@ -294,6 +307,7 @@ export class Carousel {
     }
 
     const idx = this.getIndex()
+    this.#selectedIndex = idx
     const previous = this.#prevIndex
     const slide = this.#slideManager.getSlide(idx)
     this.#dispatchEvents(() => {
@@ -516,6 +530,7 @@ export class Carousel {
         )
 
     const duration = this.#resolvedOptions.transitionDuration ?? 400
+    this.#selectedIndex = index
     if (this.#resolvedOptions.transition === 'fade' && (this.#resolvedOptions.slidesPerView ?? 1) <= 1) {
       this.#position = targetPos
       this.#performFade(previous, index, targetPos, duration)
@@ -692,8 +707,9 @@ export class Carousel {
   /* ═══════════════ Public API ═══════════════ */
 
   getIndex() {
-    if (this.#loop) return this.#loop.toIndex(this.#position)
     const step = this.#step()
+    if (step <= 0) return this.#selectedIndex
+    if (this.#loop) return this.#loop.toIndex(this.#position)
     const maxIndex = Math.max(0, Math.ceil(this.#slideManager.getSlideCount() - (this.#resolvedOptions.slidesPerView ?? 1)))
     return step > 0 ? Math.max(0, Math.min(maxIndex, Math.round(this.#position / step))) : 0
   }
@@ -738,7 +754,9 @@ export class Carousel {
     this.#initLoop()
     const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
     this.#position = Math.max(0, idx) * this.#step()
+    this.#selectedIndex = Math.max(0, idx)
     this.#render()
+    this.#selectedIndex = this.getIndex()
     this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
   }
 

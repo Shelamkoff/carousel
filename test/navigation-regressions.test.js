@@ -109,7 +109,18 @@ globalThis.HTMLElement = Element
 globalThis.document = { createElement: tag => new Element(tag), querySelector: () => null, body: new Element('body') }
 globalThis.window = new Element('window')
 globalThis.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
-globalThis.ResizeObserver = class { observe() {} disconnect() {} }
+globalThis.ResizeObserver = class {
+  static instances = new Set()
+  constructor(callback) {
+    this.callback = callback
+    this.constructor.instances.add(this)
+  }
+  observe() {}
+  disconnect() { this.constructor.instances.delete(this) }
+  static flush() {
+    for (const instance of [...this.instances]) instance.callback([])
+  }
+}
 globalThis.IntersectionObserver = class { observe() {} unobserve() {} disconnect() {} }
 const originalPerformance = globalThis.performance
 globalThis.performance = { now: () => clock.now }
@@ -299,6 +310,19 @@ test('autoplay retries a no-op navigation instead of stalling', async () => {
     assert.ok(navigations >= 2)
   } finally {
     plugin.destroy()
+  }
+})
+
+test('hidden containers retain startIndex until their width becomes measurable', () => {
+  for (const loop of [false, true]) {
+    const { host, carousel } = mount(0, 5, {
+      loop, slidesPerView: 2, startIndex: 3, transitionDuration: 0,
+    })
+    assert.equal(carousel.getIndex(), 3)
+    host.width = 300
+    ResizeObserver.flush()
+    assert.equal(carousel.getIndex(), 3)
+    carousel.destroy()
   }
 })
 
