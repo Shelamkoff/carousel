@@ -128,6 +128,7 @@ export class Carousel {
   /** @type {number | null} */
   #pendingResizeStep = null
   #plugins = new Map()
+  #installingPluginNames = new Set()
   #navigationEpoch = 0
   #selectedIndex = 0
   #notifying = false
@@ -362,21 +363,29 @@ export class Carousel {
 
   use(plugin) {
     if (this.#destroyed) throw new Error('Cannot install a plugin on a destroyed Carousel')
-    if (!plugin || typeof plugin.name !== 'string' || !plugin.name || typeof plugin.install !== 'function') {
+    if (!plugin || typeof plugin.name !== 'string' || !plugin.name.trim() || typeof plugin.install !== 'function') {
       throw new TypeError('Plugin must define a non-empty name and an install(context) function')
     }
-    if (this.#plugins.has(plugin.name)) throw new Error(`Plugin "${plugin.name}" already installed`)
-    if (ownedPluginInstances.has(plugin)) throw new Error(`Plugin "${plugin.name}" is already owned by another Carousel`)
+    const name = plugin.name
+    if (this.#plugins.has(name) || this.#installingPluginNames.has(name)) {
+      throw new Error(`Plugin "${name}" already installed or installing`)
+    }
+    if (ownedPluginInstances.has(plugin)) throw new Error(`Plugin "${name}" is already owned by another Carousel`)
     const { context: ctx, cleanup } = this.#createPluginContext()
     ownedPluginInstances.add(plugin)
+    this.#installingPluginNames.add(name)
     try {
       plugin.install(ctx)
-      this.#plugins.set(plugin.name, { plugin, context: ctx, cleanupContext: cleanup })
+      // install() may synchronously call carousel.destroy().
+      if (this.#destroyed) throw new Error(`Carousel was destroyed while installing plugin "${name}"`)
+      this.#plugins.set(name, { plugin, context: ctx, cleanupContext: cleanup })
     } catch (error) {
       try { plugin.destroy?.() } catch { /* preserve the installation error */ }
       cleanup()
       ownedPluginInstances.delete(plugin)
       throw error
+    } finally {
+      this.#installingPluginNames.delete(name)
     }
     return this
   }
@@ -865,6 +874,7 @@ export class Carousel {
       }
     }
     this.#plugins.clear()
+    this.#installingPluginNames.clear()
     this.#queuedNavigation = null
 
     this.#breakpointManager.destroy()

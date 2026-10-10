@@ -548,4 +548,53 @@ test('slide changes are not emitted with obsolete indexes after transition:end m
   carousel.destroy()
 })
 
+test('nested plugin installation cannot overwrite an in-progress registration', () => {
+  const { carousel } = mount(100, 2, { transitionDuration: 0 })
+  let nestedInstalled = 0
+  let nestedDestroyed = 0
+  let outerDestroyed = 0
+  const nested = {
+    name: 'duplicate', install() { nestedInstalled++ },
+    destroy() { nestedDestroyed++ },
+  }
+  let caught = false
+  const outer = {
+    name: 'duplicate',
+    install() {
+      try { carousel.use(nested) } catch (error) {
+        caught = error.message.includes('already installed')
+      }
+    },
+    destroy() { outerDestroyed++ },
+  }
+  carousel.use(outer)
+  assert.equal(caught, true)
+  assert.equal(nestedInstalled, 0)
+  assert.equal(carousel.getPlugin('duplicate'), outer)
+  carousel.destroy()
+  assert.equal(outerDestroyed, 1)
+  assert.equal(nestedDestroyed, 0)
+})
+
+test('destroying during plugin install always rolls back the pending plugin', () => {
+  const { carousel } = mount(100, 2, { transitionDuration: 0 })
+  let destroyed = 0
+  const plugin = {
+    name: 'self-destruct',
+    install() { carousel.destroy() },
+    destroy() { destroyed++ },
+  }
+  let rejected = false
+  try { carousel.use(plugin) } catch (error) {
+    rejected = error.message.includes('destroyed while installing')
+  }
+  assert.equal(rejected, true)
+  assert.equal(destroyed, 1)
+  assert.equal(carousel.getPlugin('self-destruct'), undefined)
+  const next = mount(100, 2, { transitionDuration: 0 })
+  next.carousel.use(plugin) // Ownership of the failed install was released.
+  next.carousel.destroy()
+  assert.equal(destroyed, 2)
+})
+
 test.after(() => { globalThis.performance = originalPerformance })
