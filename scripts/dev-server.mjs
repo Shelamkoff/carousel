@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(fileURLToPath(new URL('../', import.meta.url)))
 const host = process.env.HOST ?? '127.0.0.1'
 const port = Number.parseInt(process.env.PORT ?? '4173', 10)
-const requestedEntry = process.argv[2] ?? '/demo.html'
+const requestedEntry = process.argv[2] ?? '/index.html'
 const entryPath = requestedEntry.startsWith('/') ? requestedEntry : `/${requestedEntry}`
 
 if (!entryPath.endsWith('.html')) {

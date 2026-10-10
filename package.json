@@ -22,7 +22,7 @@
   ],
   "scripts": {
     "build": "node scripts/build-package.mjs",
-    "demo": "node scripts/dev-server.mjs /demo.html",
+    "demo": "node scripts/dev-server.mjs /index.html",
     "test": "node --test",
     "typecheck": "tsc -p type-tests/tsconfig.json",
     "check": "npm run test && npm run typecheck && npm run build",

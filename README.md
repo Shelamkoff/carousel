@@ -221,7 +221,7 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, loop and autoplay, fade, thumbnails, parallax, custom themes, and fixed scroll steps.
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, and fixed scroll steps.
 
 To run the same demo locally:
 
@@ -230,7 +230,7 @@ npm install
 npm run demo
 ```
 
-Open `http://127.0.0.1:4173/demo.html`.
+Open `http://127.0.0.1:4173/`.
 
 ## Package exports
 
