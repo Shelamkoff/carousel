@@ -32,6 +32,8 @@ export function createSwipe(options = {}) {
   let startX = 0
   let startY = 0
   let startPosition = 0
+  let startIndex = 0
+  let previousTouchAction = ''
   let dragging = false
   let trackMoved = false
   let directionDecided = false
@@ -47,6 +49,8 @@ export function createSwipe(options = {}) {
   let onMove = null
   /** @type {((e: PointerEvent) => void) | null} */
   let onUp = null
+  /** @type {((e: PointerEvent) => void) | null} */
+  let onCancel = null
   /** @type {((e: DragEvent) => void) | null} */
   let onDragStart = null
   let resizeUnsub = null
@@ -61,6 +65,7 @@ export function createSwipe(options = {}) {
     if (viewport && cachedPointerId >= 0) {
       try { viewport.releasePointerCapture(cachedPointerId) } catch (_) {}
     }
+    cachedPointerId = -1
   }
 
   return {
@@ -79,6 +84,7 @@ export function createSwipe(options = {}) {
 
         // Take over: grab current position, stop animation cleanly
         startPosition = context.getPosition()
+        startIndex = context.getIndex()
         // Cancel rAF/timers but DON'T re-render (slides already in correct position from last rAF frame)
         context.stopAnimation()
 
@@ -93,7 +99,7 @@ export function createSwipe(options = {}) {
         cachedN = context.getSlideCount()
         cachedPerView = context.getSlidesPerView()
 
-        viewport?.setPointerCapture(e.pointerId)
+        try { viewport?.setPointerCapture(e.pointerId) } catch { /* detached pointer */ }
       }
 
       onMove = /** @param {PointerEvent} e */ (e) => {
@@ -106,7 +112,11 @@ export function createSwipe(options = {}) {
         if (!directionDecided) {
           if (Math.abs(dx) < DEAD_ZONE && Math.abs(dy) < DEAD_ZONE) return
           directionDecided = true
-          if (Math.abs(dy) > Math.abs(dx)) { cancelDrag(); return }
+          if (Math.abs(dy) > Math.abs(dx)) {
+            cancelDrag()
+            context.snapBack(startIndex)
+            return
+          }
         }
 
         trackMoved = true
@@ -132,61 +142,52 @@ export function createSwipe(options = {}) {
           try { viewport.releasePointerCapture(cachedPointerId) } catch (_) {}
         }
 
-        if (!trackMoved) return
+        cachedPointerId = -1
+        if (!trackMoved) {
+          context.snapBack(startIndex)
+          return
+        }
 
         const dx = e.clientX - startX
 
         if (Math.abs(dx) < threshold || cachedStep <= 0) {
-          context.snapBack()
+          context.snapBack(startIndex)
           return
         }
 
-        const currentIdx = context.getIndex()
         const pos = context.getPosition()
         const engine = context.getLoopEngine()
         const perScroll = context.getSlidesPerScroll()
+        const direction = dx < 0 ? 1 : -1
         let targetIdx
 
-        if (engine) {
-          targetIdx = engine.toIndex(pos)
+        if (perScroll > 1) {
+          // Exactly one scroll step from the index at pointerdown.
+          targetIdx = startIndex + direction * perScroll
         } else {
-          targetIdx = Math.round(pos / cachedStep)
+          targetIdx = engine ? engine.toIndex(pos) : Math.round(pos / cachedStep)
+          if (targetIdx === startIndex) targetIdx += direction
+        }
+
+        if (cachedLoop) {
+          targetIdx = ((targetIdx % cachedN) + cachedN) % cachedN
+        } else {
           const maxIdx = Math.max(0, Math.ceil(cachedN - cachedPerView))
           targetIdx = Math.max(0, Math.min(targetIdx, maxIdx))
         }
 
-        if (perScroll > 1) {
-          // ±1 page from START position (not current drag position)
-          // dx < 0 = swiped left = next page. dx > 0 = swiped right = prev page.
-          const startIdx = cachedLoop
-            ? context.getLoopEngine().toIndex(startPosition)
-            : Math.round(startPosition / cachedStep)
-          const startPage = Math.round(startIdx / perScroll)
-          const targetPage = dx < 0 ? startPage + 1 : startPage - 1
-
-          if (cachedLoop) {
-            const totalPages = Math.ceil(cachedN / perScroll)
-            targetIdx = ((targetPage % totalPages + totalPages) % totalPages) * perScroll
-          } else {
-            const maxIdx = Math.max(0, Math.ceil(cachedN - cachedPerView))
-            targetIdx = Math.max(0, Math.min(targetPage * perScroll, maxIdx))
-          }
-        } else {
-          if (targetIdx === currentIdx) {
-            if (dx < 0) {
-              targetIdx = cachedLoop ? (currentIdx + 1) % cachedN : Math.min(currentIdx + 1, Math.max(0, Math.ceil(cachedN - cachedPerView)))
-            } else {
-              targetIdx = cachedLoop ? (currentIdx - 1 + cachedN) % cachedN : Math.max(currentIdx - 1, 0)
-            }
-          }
-        }
-
-        if (targetIdx === currentIdx) {
-          context.snapBack()
+        if (targetIdx === startIndex) {
+          context.snapBack(startIndex)
           return
         }
 
-        context.goToAfterDrag(targetIdx)
+        context.goToAfterDrag(targetIdx, startIndex, perScroll > 1 ? direction : undefined)
+      }
+
+      onCancel = e => {
+        if (!dragging || e.pointerId !== cachedPointerId) return
+        cancelDrag()
+        context.snapBack(startIndex)
       }
 
       // AbortController: all listeners cleaned up on signal abort (destroy or DOM removal)
@@ -197,8 +198,9 @@ export function createSwipe(options = {}) {
       viewport.addEventListener('pointerdown', onDown, { signal })
       window.addEventListener('pointermove', onMove, { signal })
       window.addEventListener('pointerup', onUp, { signal })
-      window.addEventListener('pointercancel', onUp, { signal })
+      window.addEventListener('pointercancel', onCancel, { signal })
 
+      previousTouchAction = viewport.style.touchAction
       viewport.style.touchAction = 'pan-y pinch-zoom'
       onDragStart = e => e.preventDefault()
       viewport.addEventListener('dragstart', onDragStart, { signal })
@@ -213,10 +215,13 @@ export function createSwipe(options = {}) {
       // Abort all listeners at once (viewport + window)
       abortController?.abort()
       abortController = null
+      if (viewport) viewport.style.touchAction = previousTouchAction
+      previousTouchAction = ''
       viewport = null
       onDown = null
       onMove = null
       onUp = null
+      onCancel = null
       onDragStart = null
       ctx = null
     },

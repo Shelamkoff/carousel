@@ -125,6 +125,9 @@ export class Carousel {
   /** @type {number | null} */
   #pendingResizeStep = null
   #plugins = new Map()
+  #navigationEpoch = 0
+  #notifying = false
+  #queuedNavigation = null
 
   constructor(container, slides, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options)) {
@@ -207,6 +210,7 @@ export class Carousel {
     this.#render()
     this.#pendingResize = false
     this.#pendingResizeStep = null
+    this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
   }
 
   /** @returns {number} resolved slidesPerScroll */
@@ -232,18 +236,19 @@ export class Carousel {
    * Loop: each slide positioned individually. Track stays at 0.
    * Non-loop: track moves, slides stay in flex flow.
    */
-  #render() {
+  #render(clamp = true) {
     if (this.#loop) {
-      this.#loop.positionSlides(this.#trackRenderer.getSlideElements(), this.#position)
-    } else {
-      // Guard: clamp position to valid range for non-loop
+      this.#loop.positionSlides(this.#trackRenderer.getPositionElements(), this.#position)
+      return
+    }
+    if (clamp) {
       const step = this.#step()
       const count = this.#slideManager.getSlideCount()
       const perView = this.#resolvedOptions.slidesPerView ?? 1
       const maxPos = Math.max(0, count - perView) * step
       this.#position = Math.max(0, Math.min(this.#position, maxPos))
-      this.#trackRenderer.setPosition(-this.#position)
     }
+    this.#trackRenderer.setPosition(-this.#position)
   }
 
   #handleBreakpointChange() {
@@ -268,6 +273,7 @@ export class Carousel {
 
   /** Stop all running animations (rAF, CSS transition, fade). */
   #stopAllAnimations() {
+    this.#navigationEpoch++
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
     if (this.#loopTimer) { clearTimeout(this.#loopTimer); this.#loopTimer = 0 }
     this.#loopFinish = null
@@ -288,12 +294,31 @@ export class Carousel {
     }
 
     const idx = this.getIndex()
-    this.#events.emit('transition:end', { index: idx })
-    this.#events.emit('slide:change', {
-      index: idx,
-      prevIndex: this.#prevIndex,
-      slide: this.#slideManager.getSlide(idx),
+    const previous = this.#prevIndex
+    const slide = this.#slideManager.getSlide(idx)
+    this.#dispatchEvents(() => {
+      this.#events.emit('transition:end', { index: idx })
+      this.#events.emit('slide:change', { index: idx, prevIndex: previous, slide })
     })
+  }
+
+  /**
+   * Prevent listener-driven navigation from recursively entering a transition.
+   * Defer the last requested navigation until the event batch is completed.
+   * @param {() => void} dispatch
+   */
+  #dispatchEvents(dispatch) {
+    this.#notifying = true
+    try {
+      dispatch()
+    } finally {
+      this.#notifying = false
+      const queued = this.#queuedNavigation
+      this.#queuedNavigation = null
+      if (queued && !this.#destroyed) {
+        queueMicrotask(() => this.#navigate(queued.index, queued.direction, queued.fromIndex))
+      }
+    }
   }
 
   /* ═══════════════ Plugins ═══════════════ */
@@ -342,16 +367,14 @@ export class Carousel {
       next: () => this.next(),
       prev: () => this.prev(),
       goTo: (i) => this.goTo(i),
-      goToAfterDrag: (i) => {
-        // Drag already stopped animation in onDown. Skip animation lock.
-        this.#animating = false
-        this.goTo(i)
+      goToAfterDrag: (i, startIndex, direction) => {
+        this.#navigate(i, direction, startIndex)
       },
-      snapBack: () => {
-        const idx = this.getIndex()
+      snapBack: (index) => {
+        const logical = index ?? this.getIndex()
         const targetPos = this.#loop
-          ? this.#position + this.#loop.shortestDelta(this.#position, idx)
-          : idx * this.#step()
+          ? this.#position + this.#loop.shortestDelta(this.#position, logical)
+          : logical * this.#step()
         this.#animateSnapBack(targetPos, this.#resolvedOptions.transitionDuration ?? 400)
       },
 
@@ -372,7 +395,7 @@ export class Carousel {
       setPositionDrag: (pos) => {
         if (!Number.isFinite(pos)) throw new TypeError('Carousel drag position must be finite')
         this.#position = pos
-        this.#render()
+        this.#render(false)
       },
       getStep: () => this.#step(),
       getLoopEngine: () => this.#loop,
@@ -405,73 +428,85 @@ export class Carousel {
 
   /* ═══════════════ Navigation ═══════════════ */
 
-  next() { this.goTo(this.getIndex() + this.#perScroll()) }
-  prev() { this.goTo(this.getIndex() - this.#perScroll()) }
+  next() { this.#navigate(this.getIndex() + this.#perScroll(), 1) }
+  prev() { this.#navigate(this.getIndex() - this.#perScroll(), -1) }
 
   /** @param {number} index */
-  goTo(index) {
+  goTo(index) { this.#navigate(index) }
+
+  /**
+   * Navigate from a logical index. Swipe callers provide the index captured
+   * at pointerdown, never the index inferred from an in-progress drag.
+   * @param {number} index
+   * @param {1 | -1 | undefined} [direction]
+   * @param {number | undefined} [fromIndex]
+   */
+  #navigate(index, direction, fromIndex) {
     if (this.#destroyed) return
     if (!Number.isInteger(index)) throw new TypeError('Carousel: index must be an integer')
+    if (fromIndex !== undefined && !Number.isInteger(fromIndex)) {
+      throw new TypeError('Carousel: gesture origin must be an integer')
+    }
+    if (this.#notifying) {
+      this.#queuedNavigation = { index, direction, fromIndex }
+      return
+    }
 
-    // Animation lock:
-    // - Loop: always lock (interrupting rAF causes derganie)
-    // - Non-loop perScroll>1: lock (page navigation)
-    // - Non-loop perScroll=1: interrupt and navigate immediately
-    let wasAnimating = false
     if (this.#animating) {
       if (this.#loop || this.#perScroll() > 1) return
       this.#stopAllAnimations()
-      wasAnimating = true
     }
-
     const count = this.#slideManager.getSlideCount()
     if (count === 0) return
-
     const loop = this.#loop !== null
-    const prevIndex = this.getIndex()
+    const previous = fromIndex ?? this.getIndex()
 
-    if (!loop) {
-      const perView = this.#resolvedOptions.slidesPerView ?? 1
-      const maxIdx = Math.max(0, Math.ceil(count - perView))
-      index = Math.max(0, Math.min(index, maxIdx))
-      if (index === prevIndex) {
-        if (wasAnimating) {
-          this.#position = index * this.#step()
-          this.#render()
-          this.#events.emit('transition:end', { index })
-          this.#events.emit('slide:change', {
-            index,
-            prevIndex: this.#prevIndex,
-            slide: this.#slideManager.getSlide(index),
-          })
-        }
-        return
-      }
-    } else {
-      index = ((index % count) + count) % count
-      if (index === prevIndex) return
-    }
-
-    this.#prevIndex = prevIndex
-    this.#events.emit('slide:beforeChange', { fromIndex: prevIndex, toIndex: index })
-    this.#events.emit('transition:start', { fromIndex: prevIndex, toIndex: index })
-
-    let targetPos
     if (loop) {
-      const delta = this.#loop.shortestDelta(this.#position, index)
-      targetPos = this.#position + delta
+      index = ((index % count) + count) % count
     } else {
-      const perView = this.#resolvedOptions.slidesPerView ?? 1
-      const maxPosition = Math.max(0, count - perView) * this.#step()
-      targetPos = Math.min(index * this.#step(), maxPosition)
+      const maxIndex = Math.max(0, Math.ceil(count - (this.#resolvedOptions.slidesPerView ?? 1)))
+      index = Math.max(0, Math.min(index, maxIndex))
     }
 
-    if (this.#resolvedOptions.transition === 'fade') {
-      // Set position immediately so getIndex() returns target during animation
+    if (index === previous) {
+      if (fromIndex !== undefined) {
+        const delta = loop
+          ? this.#loop.shortestDelta(this.#position, index)
+          : index * this.#step() - this.#position
+        if (Math.abs(delta) > 0.01) {
+          this.#animateSnapBack(this.#position + delta, this.#resolvedOptions.transitionDuration ?? 400)
+        }
+      }
+      return
+    }
+
+    // Establish the animation lock before notifying external listeners.
+    this.#prevIndex = previous
+    this.#animating = true
+    const epoch = ++this.#navigationEpoch
+    this.#dispatchEvents(() => {
+      this.#events.emit('slide:beforeChange', { fromIndex: previous, toIndex: index })
+      if (!this.#destroyed && this.#navigationEpoch === epoch) {
+        this.#events.emit('transition:start', { fromIndex: previous, toIndex: index })
+      }
+    })
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
+
+    const targetPos = loop
+      ? this.#position + (direction
+        ? this.#loop.directedDelta(this.#position, index, direction)
+        : this.#loop.shortestDelta(this.#position, index))
+      : Math.min(
+          index * this.#step(),
+          Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1)) * this.#step(),
+        )
+
+    const duration = this.#resolvedOptions.transitionDuration ?? 400
+    if (this.#resolvedOptions.transition === 'fade' && (this.#resolvedOptions.slidesPerView ?? 1) <= 1) {
       this.#position = targetPos
-      this.#performFade(prevIndex, index, targetPos, this.#resolvedOptions.transitionDuration ?? 400)
+      this.#performFade(previous, index, targetPos, duration)
     } else {
-      this.#animateToPosition(targetPos, this.#resolvedOptions.transitionDuration ?? 400)
+      this.#animateToPosition(targetPos, duration)
     }
   }
 
@@ -578,107 +613,66 @@ export class Carousel {
    * @param {number} duration
    */
   #animateToPosition(targetPos, duration) {
-    this.#animating = true
-
-    if (this.#loop) {
-      // Loop: per-slide positioning via rAF + safety timeout fallback
-      const startPos = this.#position
-      const delta = targetPos - startPos
-      const start = performance.now()
-      let done = false
-
-      const finish = () => {
-        if (done) return
-        done = true
-        if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
-        if (this.#loopTimer) { clearTimeout(this.#loopTimer); this.#loopTimer = 0 }
-        this.#loopFinish = null
-        // Snap to exact slide position (avoid float drift from drag)
-        const idx = this.#loop.toIndex(targetPos)
-        this.#position = idx * this.#loop.step
-        this.#loop.positionSlides(this.#trackRenderer.getSlideElements(), this.#position)
-        this.#onAnimationComplete()
-      }
-
-      this.#loopFinish = finish
-      this.#loopTimer = setTimeout(finish, duration + 50)
-
-      const step = (now) => {
-        if (done) return
-        const t = Math.min((now - start) / duration, 1)
-        const eased = 1 - Math.pow(1 - t, 3)
-        this.#position = startPos + delta * eased
-        this.#loop.positionSlides(this.#trackRenderer.getSlideElements(), this.#position)
-
-        if (t < 1) {
-          this.#rafId = requestAnimationFrame(step)
-        } else {
-          finish()
-        }
-      }
-      this.#rafId = requestAnimationFrame(step)
-    } else {
-      // Non-loop: CSS transition on track
-      this.#position = targetPos
-      this.#trackRenderer.animateTo(-targetPos, duration, () => {
-        this.#onAnimationComplete()
-      })
-    }
+    this.#runPositionAnimation(targetPos, duration, () => this.#onAnimationComplete())
   }
 
   /**
-   * Animate back to current slide without emitting slide:change.
+   * Settle an aborted drag without emitting slide:change.
    * @param {number} targetPos
    * @param {number} duration
    */
   #animateSnapBack(targetPos, duration) {
-    this.#animating = true
-
-    const onDone = () => {
+    this.#runPositionAnimation(targetPos, duration, () => {
       this.#animating = false
       if (this.#pendingResize) {
-        this.#pendingResize = false
         const previousStep = this.#pendingResizeStep ?? this.#step()
-        this.#pendingResizeStep = null
         this.#applyResize(previousStep)
       }
-    }
+    })
+  }
 
-    if (this.#loop) {
-      const startPos = this.#position
-      const delta = targetPos - startPos
-      const start = performance.now()
-      let done = false
-
-      const finish = () => {
-        if (done) return
-        done = true
-        if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
-        if (this.#loopTimer) { clearTimeout(this.#loopTimer); this.#loopTimer = 0 }
-        this.#loopFinish = null
-        const idx = this.#loop.toIndex(targetPos)
-        this.#position = idx * this.#loop.step
-        this.#loop.positionSlides(this.#trackRenderer.getSlideElements(), this.#position)
-        onDone()
-      }
-
-      this.#loopFinish = finish
-      this.#loopTimer = setTimeout(finish, duration + 50)
-
-      const step = (now) => {
-        if (done) return
-        const t = Math.min((now - start) / duration, 1)
-        const eased = 1 - Math.pow(1 - t, 3)
-        this.#position = startPos + delta * eased
-        this.#loop.positionSlides(this.#trackRenderer.getSlideElements(), this.#position)
-        if (t < 1) this.#rafId = requestAnimationFrame(step)
-        else finish()
-      }
-      this.#rafId = requestAnimationFrame(step)
-    } else {
+  /**
+   * One animation clock for both loop and finite navigation. The position
+   * model always holds the actual rendered coordinate, even mid-transition.
+   * @param {number} targetPos
+   * @param {number} duration
+   * @param {() => void} done
+   */
+  #runPositionAnimation(targetPos, duration, done) {
+    this.#animating = true
+    const startPos = this.#position
+    if (duration <= 0 || Math.abs(targetPos - startPos) < 0.001) {
       this.#position = targetPos
-      this.#trackRenderer.animateTo(-targetPos, duration, onDone)
+      this.#render()
+      done()
+      return
     }
+
+    const startTime = performance.now()
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
+      if (this.#loopTimer) { clearTimeout(this.#loopTimer); this.#loopTimer = 0 }
+      this.#loopFinish = null
+      this.#position = targetPos
+      this.#render()
+      done()
+    }
+
+    this.#loopFinish = finish
+    this.#loopTimer = setTimeout(finish, duration + 60)
+    const frame = now => {
+      if (settled) return
+      const progress = Math.max(0, Math.min((now - startTime) / duration, 1))
+      const eased = 1 - Math.pow(1 - progress, 3)
+      this.#position = startPos + (targetPos - startPos) * eased
+      this.#render()
+      if (progress < 1) this.#rafId = requestAnimationFrame(frame)
+      else finish()
+    }
+    this.#rafId = requestAnimationFrame(frame)
   }
 
   /* ═══════════════ Public API ═══════════════ */
@@ -686,7 +680,8 @@ export class Carousel {
   getIndex() {
     if (this.#loop) return this.#loop.toIndex(this.#position)
     const step = this.#step()
-    return step > 0 ? Math.max(0, Math.round(this.#position / step)) : 0
+    const maxIndex = Math.max(0, Math.ceil(this.#slideManager.getSlideCount() - (this.#resolvedOptions.slidesPerView ?? 1)))
+    return step > 0 ? Math.max(0, Math.min(maxIndex, Math.round(this.#position / step))) : 0
   }
 
   getRealIndex() { return this.getIndex() }
@@ -803,6 +798,7 @@ export class Carousel {
       }
     }
     this.#plugins.clear()
+    this.#queuedNavigation = null
 
     this.#breakpointManager.destroy()
     this.#trackRenderer.destroy()

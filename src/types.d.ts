@@ -23,8 +23,8 @@ export interface PluginContext {
   next(): void
   prev(): void
   goTo(index: number): void
-  goToAfterDrag(index: number): void
-  snapBack(): void
+  goToAfterDrag(index: number, fromIndex: number, direction?: 1 | -1): void
+  snapBack(index?: number): void
 
   // Read-only state
   getIndex(): number

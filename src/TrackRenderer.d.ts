@@ -4,7 +4,7 @@ export class TrackRenderer {
   build(container: HTMLElement, slides: SlideData[], layout: { slidesPerView: number; gap: number; loop?: boolean }): { root: HTMLElement; viewport: HTMLElement; track: HTMLElement }
   onResize(callback: (previousSlideWidth: number) => void): void
   onRenderError(callback: (index: number, error: Error) => void): void
-  renderSlide(trackIndex: number, slide: SlideData): void
+  renderSlide(trackIndex: number, slide: SlideData): boolean
   updateLayout(slidesPerView: number, gap: number): void
   refreshLayout(): void
   get slideWidth(): number
@@ -18,6 +18,7 @@ export class TrackRenderer {
   getViewport(): HTMLElement | null
   getTrack(): HTMLElement | null
   getSlideElements(): HTMLElement[]
+  getPositionElements(): HTMLElement[]
   getSlideElement(index: number): HTMLElement | null
   destroy(): void
 }

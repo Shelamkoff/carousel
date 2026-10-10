@@ -10,6 +10,12 @@ export class TrackRenderer {
   #track = null
   /** @type {HTMLElement[]} */
   #slideElements = []
+  /** @type {HTMLElement[]} */
+  #copies = []
+  /** @type {import('./types').SlideData[]} */
+  #sourceSlides = []
+  /** @type {Array<import('./types').SlideData['content']>} */
+  #sourceContent = []
   /** @type {HTMLElement | null} */
   #root = null
   /** @type {ResizeObserver | null} */
@@ -53,17 +59,9 @@ export class TrackRenderer {
     const track = document.createElement('div')
     track.className = 'carousel__track'
 
-    this.#slideElements = slides.map((slide, i) => {
-      const el = document.createElement('div')
-      el.className = 'carousel__slide'
-      el.setAttribute('role', 'group')
-      el.setAttribute('aria-roledescription', 'slide')
-      el.setAttribute('aria-label', `${i + 1} of ${slides.length}`)
-      el.dataset.index = String(i)
-      if (!slide.lazy) this.#renderContent(el, slide, i)
-      return el
-    })
-
+    this.#slideElements = slides.map((slide, i) => this.#createSlide(slide, i, slides.length))
+    this.#sourceSlides = [...slides]
+    this.#sourceContent = slides.map(slide => slide.content)
     for (const el of this.#slideElements) track.appendChild(el)
 
     viewport.appendChild(track)
@@ -74,11 +72,62 @@ export class TrackRenderer {
     this.#viewport = viewport
     this.#track = track
 
+    this.#configureCopies(layout.slidesPerView)
     this.updateLayout(layout.slidesPerView, layout.gap)
     this.#setupResizeObserver()
     this.#setupSlideResizeObserver()
 
     return { root, viewport, track }
+  }
+
+  /**
+   * @param {import('./types').SlideData} slide
+   * @param {number} index
+   * @param {number} count
+   */
+  #createSlide(slide, index, count) {
+    const el = document.createElement('div')
+    el.className = 'carousel__slide'
+    el.setAttribute('role', 'group')
+    el.setAttribute('aria-roledescription', 'slide')
+    el.setAttribute('aria-label', String(index + 1) + ' of ' + count)
+    el.dataset.index = String(index)
+    if (!slide.lazy) this.#renderContent(el, slide, index)
+    return el
+  }
+
+  /**
+   * Partial swipes need more visual slots than source slides in short loops.
+   * Copies are inert and do not participate in logical indexes or events.
+   * @param {number} perView
+   */
+  #configureCopies(perView) {
+    for (const node of this.#copies) node.remove()
+    this.#copies = []
+    if (!this.#isLoop || !this.#track) return
+    const count = this.#slideElements.length
+    if (count === 0 || count > perView) return
+    const cycles = Math.ceil(perView / count)
+    for (let cycle = 1; cycle <= cycles; cycle++) {
+      for (let i = 0; i < count; i++) {
+        const copy = /** @type {HTMLElement} */ (this.#slideElements[i].cloneNode(true))
+        copy.dataset.carouselCopy = String(cycle)
+        copy.setAttribute('aria-hidden', 'true')
+        copy.inert = true
+        this.#copies.push(copy)
+        this.#track.appendChild(copy)
+      }
+    }
+  }
+
+  /** @param {number} index */
+  #syncCopies(index) {
+    const original = this.#slideElements[index]
+    for (const copy of this.#copies) {
+      if (Number(copy.dataset.index) !== index) continue
+      copy.replaceChildren(...[...original.childNodes].map(node => node.cloneNode(true)))
+      copy.dataset.rendered = original.dataset.rendered
+    }
   }
 
   /** @type {number} */
@@ -138,9 +187,13 @@ export class TrackRenderer {
   /** @param {number} trackIndex @param {import('./types').SlideData} slide */
   renderSlide(trackIndex, slide) {
     const el = this.#slideElements[trackIndex]
-    if (!el || el.dataset.rendered === 'true') return
+    if (!el) return false
+    if (el.dataset.rendered === 'true') return true
     this.#renderContent(el, slide, trackIndex)
+    if (el.dataset.rendered !== 'true') return false
+    this.#syncCopies(trackIndex)
     this.refreshLayout()
+    return true
   }
 
   /** @param {number} slidesPerView @param {number} gap */
@@ -159,8 +212,7 @@ export class TrackRenderer {
     const totalGap = this.#gap * (this.#slidesPerView - 1)
     this.#slideWidth = Math.max(0, (vw - totalGap) / this.#slidesPerView)
 
-    for (let i = 0; i < this.#slideElements.length; i++) {
-      const el = this.#slideElements[i]
+    for (const el of this.getPositionElements()) {
       el.style.width = this.#slideWidth + 'px'
       el.style.minWidth = this.#slideWidth + 'px'
       el.style.flexBasis = this.#slideWidth + 'px'
@@ -177,6 +229,7 @@ export class TrackRenderer {
         el.style.position = ''
         el.style.top = ''
         el.style.left = ''
+        el.style.transform = ''
       }
     }
 
@@ -252,24 +305,51 @@ export class TrackRenderer {
     if (!this.#track) return
     this.#slideResizeObserver?.disconnect()
     this.#slideResizeObserver = null
+    this.#configureCopies(0) // discard old visual copies
     this.#isLoop = layout.loop ?? false
-    this.#track.innerHTML = ''
+    this.#root?.classList.toggle('carousel--loop', this.#isLoop)
 
-    if (this.#root) {
-      this.#root.classList.toggle('carousel--loop', this.#isLoop)
+    // Reuse the original DOM nodes for unchanged SlideData objects.
+    // A breakpoint change must not wipe focus, input state or listeners.
+    const pool = new Map()
+    for (let i = 0; i < this.#sourceSlides.length; i++) {
+      const data = this.#sourceSlides[i]
+      if (!pool.has(data)) pool.set(data, [])
+      pool.get(data).push({ element: this.#slideElements[i], content: this.#sourceContent[i] })
     }
 
-    this.#slideElements = slides.map((slide, i) => {
-      const el = document.createElement('div')
-      el.className = 'carousel__slide'
-      el.setAttribute('role', 'group')
-      el.setAttribute('aria-roledescription', 'slide')
-      el.setAttribute('aria-label', `${i + 1} of ${slides.length}`)
-      el.dataset.index = String(i)
-      if (!slide.lazy) this.#renderContent(el, slide, i)
+    const next = slides.map((slide, index) => {
+      const previous = pool.get(slide)?.shift()
+      const el = previous ? previous.element : this.#createSlide(slide, index, slides.length)
+      if (previous && previous.content !== slide.content) {
+        el.replaceChildren()
+        delete el.dataset.rendered
+        delete el.dataset.loaded
+        el.classList.remove('carousel__slide--error', 'carousel__slide--loaded')
+        if (!slide.lazy) this.#renderContent(el, slide, index)
+      }
+      el.dataset.index = String(index)
+      el.setAttribute('aria-label', String(index + 1) + ' of ' + slides.length)
       return el
     })
-    for (const el of this.#slideElements) this.#track.appendChild(el)
+
+    // A stable ordering requires no DOM moves at all.
+    const kept = new Set(next)
+    for (let i = 0; i < next.length; i++) {
+      if (this.#track.children[i] !== next[i]) {
+        this.#track.insertBefore(next[i], this.#track.children[i] ?? null)
+      }
+    }
+    for (const old of this.#slideElements) {
+      if (!kept.has(old)) old.remove()
+    }
+
+    this.#slideElements = next
+    this.#sourceSlides = [...slides]
+    this.#sourceContent = slides.map(slide => slide.content)
+    this.#configureCopies(layout.slidesPerView)
+    if (this.#isLoop) this.#track.style.transform = 'none'
+    else this.#track.style.height = ''
     this.updateLayout(layout.slidesPerView, layout.gap)
     this.#setupSlideResizeObserver()
   }
@@ -282,6 +362,7 @@ export class TrackRenderer {
   getTrack() { return this.#track }
   /** @returns {HTMLElement[]} */
   getSlideElements() { return this.#slideElements }
+  getPositionElements() { return this.#isLoop ? [...this.#slideElements, ...this.#copies] : this.#slideElements }
   /** @param {number} index @returns {HTMLElement | null} */
   getSlideElement(index) { return this.#slideElements[index] ?? null }
 
@@ -293,10 +374,14 @@ export class TrackRenderer {
     this.#slideResizeObserver = null
     this.#onResize = null
     this.#onRenderError = null
+    for (const copy of this.#copies) copy.remove()
+    this.#copies = []
     this.#root?.remove()
     this.#root = null
     this.#viewport = null
     this.#track = null
     this.#slideElements = []
+    this.#sourceSlides = []
+    this.#sourceContent = []
   }
 }
