@@ -315,14 +315,16 @@ export class Carousel {
 
   #onAnimationComplete() {
     this.#animating = false
+    const epoch = this.#navigationEpoch
 
-    // Apply deferred resize before reporting final index
+    // Resize handlers are allowed to update/destroy the carousel.
     if (this.#pendingResize) {
       this.#pendingResize = false
       const previousStep = this.#pendingResizeStep ?? this.#step()
       this.#pendingResizeStep = null
       this.#applyResize(previousStep)
     }
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
 
     const idx = this.getIndex()
     this.#selectedIndex = idx
@@ -330,6 +332,9 @@ export class Carousel {
     const slide = this.#slideManager.getSlide(idx)
     this.#dispatchEvents(() => {
       this.#events.emit('transition:end', { index: idx })
+      // A transition:end subscriber may synchronously mutate the slide list
+      // or reconfigure the layout. Suppress the obsolete change notification.
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#events.emit('slide:change', { index: idx, prevIndex: previous, slide })
     })
   }

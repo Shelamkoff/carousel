@@ -531,4 +531,21 @@ test('autoplay resumes after a pointer interrupts an automatic transition', asyn
   }
 })
 
+test('slide changes are not emitted with obsolete indexes after transition:end mutation', () => {
+  const { carousel } = mount(100, 3, { transitionDuration: 0 })
+  let completed = 0
+  const changes = []
+  carousel.on('transition:end', () => {
+    completed++
+    carousel.removeSlide(0)
+  })
+  carousel.on('slide:change', event => changes.push(event))
+  carousel.goTo(1)
+  assert.equal(completed, 1)
+  assert.equal(carousel.getIndex(), 0)
+  assert.equal(carousel.getSlide().content, '1')
+  assert.equal(changes.length, 0)
+  carousel.destroy()
+})
+
 test.after(() => { globalThis.performance = originalPerformance })
