@@ -482,4 +482,53 @@ test('long page swipes settle without an extra revolution', () => {
   carousel.destroy()
 })
 
+test('autoplay stops on touch even if the user never changes slides', async () => {
+  const autoplay = createAutoplay({
+    interval: 5, pauseOnInteraction: true, pauseOnHover: false,
+  })
+  const { carousel, viewport } = mount(100, 5, {
+    loop: true, transitionDuration: 400,
+    plugins: [autoplay, createSwipe()],
+  })
+  try {
+    await new Promise(resolve => carousel.once('transition:start', resolve))
+    viewport.dispatchEvent({
+      type: 'pointerdown', pointerId: 91, pointerType: 'touch',
+      button: 0, isPrimary: true, clientX: 20, clientY: 20,
+    })
+    window.dispatchEvent({ type: 'pointerup', pointerId: 91, pointerType: 'touch' })
+    assert.equal(autoplay.isActive(), false)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('autoplay resumes after a pointer interrupts an automatic transition', async () => {
+  const autoplay = createAutoplay({
+    interval: 5, pauseOnInteraction: false, pauseOnHover: false,
+  })
+  const { carousel, viewport } = mount(100, 5, {
+    loop: true, transitionDuration: 400,
+    plugins: [autoplay, createSwipe()],
+  })
+  try {
+    const first = new Promise(resolve => carousel.once('transition:start', resolve))
+    await first
+    const again = new Promise(resolve => carousel.once('transition:start', resolve))
+    viewport.dispatchEvent({
+      type: 'pointerdown', pointerId: 92, pointerType: 'touch',
+      button: 0, isPrimary: true, clientX: 40, clientY: 10,
+    })
+    window.dispatchEvent({ type: 'pointerup', pointerId: 92, pointerType: 'touch' })
+    frame(500) // finish the gesture snap-back
+    await Promise.race([
+      again,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('autoplay stuck after pointer')), 250)),
+    ])
+    assert.equal(autoplay.isActive(), true)
+  } finally {
+    carousel.destroy()
+  }
+})
+
 test.after(() => { globalThis.performance = originalPerformance })

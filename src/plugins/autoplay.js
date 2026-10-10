@@ -16,6 +16,9 @@ export function createAutoplay(options = {}) {
   let paused = false
   let autoplayTriggered = false
   let autoNavigationStarted = false
+  let pointerHeld = false
+  let onPointerDown = null
+  let onPointerEnd = null
 
   const interval = options.interval ?? 3000
   const pauseOnHover = options.pauseOnHover ?? true
@@ -34,10 +37,10 @@ export function createAutoplay(options = {}) {
 
   function scheduleNext() {
     clearTimeout(timer)
-    if (!active || paused) return
+    if (!active || paused || pointerHeld) return
     timer = setTimeout(() => {
       timer = null
-      if (!active || paused) return
+      if (!active || paused || pointerHeld) return
       const count = ctx?.getSlideCount() ?? 0
       const maxIndex = Math.max(0, Math.ceil(count - (ctx?.getSlidesPerView() ?? 1)))
       if (count <= 1 || (!ctx?.isLoop() && (ctx?.getIndex() ?? 0) >= maxIndex)) {
@@ -67,10 +70,35 @@ export function createAutoplay(options = {}) {
       const root = context.getRoot()
 
       if (pauseOnHover && root) {
-        onEnter = () => { paused = true; clearTimeout(timer) }
+        onEnter = () => { paused = true; clearTimeout(timer); timer = null }
         onLeave = () => { paused = false; if (active) scheduleNext() }
         root.addEventListener('mouseenter', onEnter)
         root.addEventListener('mouseleave', onLeave)
+      }
+
+      // Pointer interaction may cancel an in-flight carousel transition,
+      // which has no transition:end event to restart the autoplay timer.
+      // Stop on interaction when configured, otherwise suspend the timer
+      // until the user releases/cancels their pointer.
+      const viewport = context.getViewport?.()
+      if (viewport) {
+        onPointerDown = () => {
+          if (pauseOnInteraction) {
+            this.stop()
+          } else {
+            pointerHeld = true
+            clearTimeout(timer)
+            timer = null
+          }
+        }
+        onPointerEnd = () => {
+          if (!pointerHeld) return
+          pointerHeld = false
+          if (active && !paused) scheduleNext()
+        }
+        viewport.addEventListener('pointerdown', onPointerDown)
+        window.addEventListener('pointerup', onPointerEnd)
+        window.addEventListener('pointercancel', onPointerEnd)
       }
 
       unsubs.push(
@@ -99,6 +127,15 @@ export function createAutoplay(options = {}) {
         if (onEnter) root.removeEventListener('mouseenter', onEnter)
         if (onLeave) root.removeEventListener('mouseleave', onLeave)
       }
+      const viewport = ctx?.getViewport?.()
+      if (viewport && onPointerDown) viewport.removeEventListener('pointerdown', onPointerDown)
+      if (onPointerEnd) {
+        window.removeEventListener('pointerup', onPointerEnd)
+        window.removeEventListener('pointercancel', onPointerEnd)
+      }
+      pointerHeld = false
+      onPointerDown = null
+      onPointerEnd = null
       onEnter = null
       onLeave = null
       ctx = null
