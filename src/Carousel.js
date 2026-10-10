@@ -249,7 +249,12 @@ export class Carousel {
    */
   #render(clamp = true) {
     if (this.#loop) {
-      this.#loop.positionSlides(this.#trackRenderer.getPositionElements(), this.#position)
+      this.#loop.positionSlides(
+        this.#trackRenderer.getPositionElements(),
+        this.#position,
+        this.#trackRenderer.viewportWidth,
+        this.#trackRenderer.slideWidth,
+      )
       return
     }
     if (clamp) {

@@ -7,6 +7,7 @@ export class TrackRenderer {
   renderSlide(trackIndex: number, slide: SlideData): boolean
   updateLayout(slidesPerView: number, gap: number): void
   refreshLayout(): void
+  get viewportWidth(): number
   get slideWidth(): number
   get gap(): number
   get slidesPerView(): number

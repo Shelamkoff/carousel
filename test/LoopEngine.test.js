@@ -39,6 +39,15 @@ test('visual copies fill a loop as short as the viewport', () => {
   }
 })
 
+test('interactive originals occupy visible replica slots in short loops', () => {
+  const loop = new LoopEngine(3, 100)
+  const nodes = slides(3, 1)
+  loop.positionSlides(nodes, 150, 300, 100)
+  assert.equal(positions(nodes)[0], 150)
+  assert.equal(positions(nodes)[3], -150)
+  assertFilled(nodes, 300, 100)
+})
+
 test('directed navigation preserves forward/backward travel on ties and page moves', () => {
   const two = new LoopEngine(2, 100)
   assert.equal(two.directedDelta(0, 1, 1), 100)

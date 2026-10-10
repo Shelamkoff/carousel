@@ -90,25 +90,55 @@ export class LoopEngine {
    *
    * @param {HTMLElement[]} slides
    * @param {number} position
+   * @param {number} [viewportWidth] — necessary to promote interactive originals over copies
+   * @param {number} [slideWidth]
    */
-  positionSlides(slides, position) {
+  positionSlides(slides, position, viewportWidth = 0, slideWidth = 0) {
     if (this.#count === 0 || this.#step <= 0) return
     const loopLength = this.#loopLength
     const normalized = this.normalize(position)
     const hasCopies = slides.some(slide => slide.dataset?.carouselCopy !== undefined)
 
-    for (let index = 0; index < slides.length; index++) {
-      const slide = slides[index]
+    const slots = slides.map((slide, index) => {
+      const logical = Number(slide.dataset?.index ?? index % this.#count)
+      const copy = Number(slide.dataset?.carouselCopy ?? 0)
       let x
       if (hasCopies) {
-        const logical = Number(slide.dataset?.index ?? index % this.#count)
-        const copy = Number(slide.dataset?.carouselCopy ?? 0)
         x = logical * this.#step + copy * loopLength - normalized
       } else {
         x = index * this.#step - normalized
         x -= loopLength * Math.floor((x + this.#step) / loopLength)
       }
-      slide.style.transform = `translate3d(${x}px, 0, 0)`
+      return { slide, logical, copy, x }
+    })
+
+    if (hasCopies && viewportWidth > 0 && slideWidth > 0) {
+      // Replicas have no application event listeners. Keep the original
+      // interactive node at the most visible instance of each logical slide
+      // and swap the inert replica into its former position instead.
+      const originalByIndex = new Map()
+      const bestByIndex = new Map()
+      const overlap = x => Math.max(0,
+        Math.min(viewportWidth, x + slideWidth) - Math.max(0, x))
+      for (const slot of slots) {
+        if (slot.copy === 0) originalByIndex.set(slot.logical, slot)
+        const best = bestByIndex.get(slot.logical)
+        if (!best || overlap(slot.x) > overlap(best.x)) {
+          bestByIndex.set(slot.logical, slot)
+        }
+      }
+      for (const [logical, original] of originalByIndex) {
+        const best = bestByIndex.get(logical)
+        if (best && best !== original && overlap(best.x) > overlap(original.x)) {
+          const oldPosition = original.x
+          original.x = best.x
+          best.x = oldPosition
+        }
+      }
+    }
+
+    for (const { slide, x } of slots) {
+      slide.style.transform = 'translate3d(' + x + 'px, 0, 0)'
     }
   }
 

@@ -326,4 +326,21 @@ test('hidden containers retain startIndex until their width becomes measurable',
   }
 })
 
+test('loop replicas never replace the interactive original in view', () => {
+  const probe = { name: 'position-probe', install(ctx) { this.context = ctx } }
+  const { carousel, track } = mount(300, 3, {
+    loop: true, slidesPerView: 3, transitionDuration: 0, plugins: [probe],
+  })
+  const original = track.children[0]
+  const copy = track.children[3]
+  let clicked = false
+  original.addEventListener('click', () => { clicked = true })
+  probe.context.setPositionDrag(150)
+  assert.ok(original.style.transform.includes('translate3d(150px'))
+  assert.ok(copy.style.transform.includes('translate3d(-150px'))
+  original.dispatchEvent({ type: 'click' })
+  assert.equal(clicked, true)
+  carousel.destroy()
+})
+
 test.after(() => { globalThis.performance = originalPerformance })

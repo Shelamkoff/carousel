@@ -258,6 +258,8 @@ export class TrackRenderer {
   }
 
   /** @returns {number} */
+  get viewportWidth() { return this.#lastViewportWidth }
+  /** @returns {number} */
   get slideWidth() { return this.#slideWidth }
   /** @returns {number} */
   get gap() { return this.#gap }
