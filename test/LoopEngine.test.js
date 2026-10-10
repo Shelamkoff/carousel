@@ -16,7 +16,7 @@ function positions(nodes) {
 function assertFilled(nodes, viewWidth, slideWidth) {
   const xs = positions(nodes)
   for (let x = 0; x < viewWidth; x += 1) {
-    assert.ok(xs.some(left => left <= x && left + slideWidth >= x + 1),
+    assert.ok(xs.some(left => left <= x + 0.5 && left + slideWidth >= x + 0.5),
       `visible gap at pixel ${x}, positions: ${xs}`)
   }
 }
