@@ -468,4 +468,18 @@ test('fractional multi-slide loops keep the viewport filled during wraparound', 
   carousel.destroy()
 })
 
+test('long page swipes settle without an extra revolution', () => {
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel, viewport } = mount(100, 5, {
+    loop: true, slidesPerScroll: 2, transitionDuration: 100,
+    plugins: [createSwipe({ threshold: 50 }), probe],
+  })
+  pointer(viewport, 'pointerup', -350)
+  assert.equal(carousel.getIndex(), 4) // Visual index during an unsettled drag
+  frame(120)
+  assert.equal(carousel.getIndex(), 2)
+  assert.equal(probe.ctx.getPosition(), 200)
+  carousel.destroy()
+})
+
 test.after(() => { globalThis.performance = originalPerformance })

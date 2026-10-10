@@ -181,7 +181,7 @@ export function createSwipe(options = {}) {
           return
         }
 
-        context.goToAfterDrag(targetIdx, startIndex, perScroll > 1 ? direction : undefined)
+        context.goToAfterDrag(targetIdx, startIndex, perScroll > 1 ? direction : undefined, startPosition)
       }
 
       onCancel = e => {

@@ -348,7 +348,7 @@ export class Carousel {
       const queued = this.#queuedNavigation
       this.#queuedNavigation = null
       if (queued && !this.#destroyed) {
-        queueMicrotask(() => this.#navigate(queued.index, queued.direction, queued.fromIndex))
+        queueMicrotask(() => this.#navigate(queued.index, queued.direction, queued.fromIndex, queued.startPosition))
       }
     }
   }
@@ -399,8 +399,8 @@ export class Carousel {
       next: () => this.next(),
       prev: () => this.prev(),
       goTo: (i) => this.goTo(i),
-      goToAfterDrag: (i, startIndex, direction) => {
-        this.#navigate(i, direction, startIndex)
+      goToAfterDrag: (i, startIndex, direction, startPosition) => {
+        this.#navigate(i, direction, startIndex, startPosition)
       },
       snapBack: (index) => {
         const logical = index ?? this.getIndex()
@@ -486,15 +486,19 @@ export class Carousel {
    * @param {number} index
    * @param {1 | -1 | undefined} [direction]
    * @param {number | undefined} [fromIndex]
+   * @param {number | undefined} [startPosition] raw position at gesture start
    */
-  #navigate(index, direction, fromIndex) {
+  #navigate(index, direction, fromIndex, startPosition) {
     if (this.#destroyed) return
     if (!Number.isInteger(index)) throw new TypeError('Carousel: index must be an integer')
     if (fromIndex !== undefined && !Number.isInteger(fromIndex)) {
       throw new TypeError('Carousel: gesture origin must be an integer')
     }
+    if (startPosition !== undefined && !Number.isFinite(startPosition)) {
+      throw new TypeError('Carousel: gesture startPosition must be finite')
+    }
     if (this.#notifying) {
-      this.#queuedNavigation = { index, direction, fromIndex }
+      this.#queuedNavigation = { index, direction, fromIndex, startPosition }
       return
     }
 
@@ -538,10 +542,14 @@ export class Carousel {
     })
     if (this.#destroyed || this.#navigationEpoch !== epoch) return
 
+    // Gesture navigation is anchored to pointerdown. Using the already
+    // dragged position for a directed delta can add an entire revolution.
     const targetPos = loop
-      ? this.#position + (direction
-        ? this.#loop.directedDelta(this.#position, index, direction)
-        : this.#loop.shortestDelta(this.#position, index))
+      ? direction && startPosition !== undefined
+        ? startPosition + this.#loop.directedDelta(startPosition, index, direction)
+        : this.#position + (direction
+          ? this.#loop.directedDelta(this.#position, index, direction)
+          : this.#loop.shortestDelta(this.#position, index))
       : Math.min(
           index * this.#step(),
           Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1)) * this.#step(),
