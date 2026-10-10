@@ -112,9 +112,23 @@ export class TrackRenderer {
         copy.dataset.carouselCopy = String(cycle)
         copy.setAttribute('aria-hidden', 'true')
         copy.inert = true
+        this.#stripCopyIds(copy)
         this.#copies.push(copy)
         this.#track.appendChild(copy)
       }
+    }
+  }
+
+  /**
+   * Visual replicas are never interactive. Remove duplicate HTML IDs before
+   * attaching copies to the DOM so application selectors remain unambiguous.
+   * @param {HTMLElement} copy
+   */
+  #stripCopyIds(copy) {
+    const elements = [copy]
+    for (const element of elements) {
+      element.removeAttribute('id')
+      elements.push(...element.children)
     }
   }
 
@@ -124,6 +138,7 @@ export class TrackRenderer {
     for (const copy of this.#copies) {
       if (Number(copy.dataset.index) !== index) continue
       copy.replaceChildren(...[...original.childNodes].map(node => node.cloneNode(true)))
+      this.#stripCopyIds(copy)
       copy.dataset.rendered = original.dataset.rendered
     }
   }

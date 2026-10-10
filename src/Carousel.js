@@ -65,8 +65,9 @@ function validateOptionsTree(options) {
       throw new TypeError('Carousel: breakpoint overrides must be objects')
     }
     if (Object.prototype.hasOwnProperty.call(override, 'plugins')
-      || Object.prototype.hasOwnProperty.call(override, 'startIndex')) {
-      throw new TypeError('Carousel: breakpoints cannot change plugins or startIndex')
+      || Object.prototype.hasOwnProperty.call(override, 'startIndex')
+      || Object.prototype.hasOwnProperty.call(override, 'breakpoints')) {
+      throw new TypeError('Carousel: nested breakpoints, plugins, and startIndex overrides are not supported')
     }
     Object.assign(resolved, override)
     delete resolved.breakpoints

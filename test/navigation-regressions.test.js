@@ -40,6 +40,7 @@ class Element {
   get scrollHeight() { return 20 }
   setAttribute(name, value) { this.attributes.set(name, String(value)) }
   getAttribute(name) { return this.attributes.get(name) ?? null }
+  removeAttribute(name) { this.attributes.delete(name) }
 
   insertBefore(node, reference) {
     node.remove()
@@ -412,6 +413,36 @@ test('initial render errors remain observable in console', () => {
   } finally {
     console.error = original
   }
+})
+
+test('visual replicas never duplicate application-owned element IDs', () => {
+  const host = new Element()
+  host.width = 200
+  const carousel = new Carousel(host, [
+    { content: () => {
+      const element = new Element('div')
+      element.setAttribute('id', 'slide-one-control')
+      return element
+    } },
+    { content: () => new Element('div') },
+  ], { loop: true, slidesPerView: 2, transitionDuration: 0 })
+  const track = host.children[0].children[0].children[0]
+  assert.equal(track.children[0].children[0].getAttribute('id'), 'slide-one-control')
+  assert.equal(track.children[2].children[0].getAttribute('id'), null)
+  carousel.update({ gap: 4 })
+  assert.equal(track.children[2].children[0].getAttribute('id'), null)
+  carousel.destroy()
+})
+
+test('breakpoint options reject nested breakpoint overrides', () => {
+  const host = new Element()
+  host.width = 200
+  assert.throws(
+    () => new Carousel(host, [{ content: 'one' }], {
+      breakpoints: { 600: { breakpoints: { 1200: { gap: 10 } } } },
+    }),
+    TypeError,
+  )
 })
 
 test.after(() => { globalThis.performance = originalPerformance })
