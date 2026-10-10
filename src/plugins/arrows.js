@@ -25,15 +25,24 @@ export function createArrows(options = {}) {
 
   function updateVisibility() {
     if (!ctx || !prevBtn || !nextBtn) return
+    const count = ctx.getSlideCount()
+    if (count <= 1) {
+      prevBtn.style.display = 'none'
+      nextBtn.style.display = 'none'
+      return
+    }
     if (ctx.isLoop()) {
       prevBtn.style.display = ''
       nextBtn.style.display = ''
       return
     }
-    if (!hideOnEdge) return
+    if (!hideOnEdge) {
+      prevBtn.style.display = ''
+      nextBtn.style.display = ''
+      return
+    }
 
     const index = ctx.getIndex()
-    const count = ctx.getSlideCount()
     const perView = ctx.getSlidesPerView()
     const maxIndex = Math.max(0, Math.ceil(count - perView))
     prevBtn.style.display = index <= 0 ? 'none' : ''

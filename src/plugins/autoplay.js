@@ -15,6 +15,7 @@ export function createAutoplay(options = {}) {
   let active = false
   let paused = false
   let autoplayTriggered = false
+  let autoNavigationStarted = false
 
   const interval = options.interval ?? 3000
   const pauseOnHover = options.pauseOnHover ?? true
@@ -35,6 +36,7 @@ export function createAutoplay(options = {}) {
     clearTimeout(timer)
     if (!active || paused) return
     timer = setTimeout(() => {
+      timer = null
       if (!active || paused) return
       const count = ctx?.getSlideCount() ?? 0
       const maxIndex = Math.max(0, Math.ceil(count - (ctx?.getSlidesPerView() ?? 1)))
@@ -45,14 +47,14 @@ export function createAutoplay(options = {}) {
         ctx?.emit('autoplay:stop')
         return
       }
+      autoNavigationStarted = false
       autoplayTriggered = true
       try {
         ctx?.next()
       } finally {
-        // slide:beforeChange is synchronous and observes the true value above.
-        // If navigation was locked/no-op, do not leak that marker into the
-        // next genuine user interaction.
+        // If navigation was locked/no-op, no transition:end will arrive.
         autoplayTriggered = false
+        if (active && !paused && !autoNavigationStarted) scheduleNext()
       }
     }, interval)
   }
@@ -71,24 +73,19 @@ export function createAutoplay(options = {}) {
         root.addEventListener('mouseleave', onLeave)
       }
 
-      // After each animation ends, schedule next
       unsubs.push(
         context.on('transition:end', () => {
           if (active && !paused) scheduleNext()
         }),
+        // A rebuild can cancel the current transition without transition:end.
+        context.on('resize', () => {
+          if (active && !paused) scheduleNext()
+        }),
+        context.on('slide:beforeChange', () => {
+          if (autoplayTriggered) autoNavigationStarted = true
+          else if (pauseOnInteraction && active) this.stop()
+        }),
       )
-
-      // Detect user interaction (not autoplay)
-      if (pauseOnInteraction) {
-        unsubs.push(
-          context.on('slide:beforeChange', () => {
-            if (!autoplayTriggered && active) {
-              this.stop()
-            }
-            autoplayTriggered = false
-          }),
-        )
-      }
 
       this.start()
     },
@@ -108,7 +105,10 @@ export function createAutoplay(options = {}) {
     },
 
     start() {
-      if (active) return
+      if (active) {
+        if (ctx && !paused && timer === null) scheduleNext()
+        return
+      }
       active = true
       paused = false
       autoplayTriggered = false

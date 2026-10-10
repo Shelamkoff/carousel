@@ -4,6 +4,9 @@ import { Carousel } from '../src/Carousel.js'
 import { createSwipe } from '../src/plugins/swipe.js'
 import { createParallax } from '../src/plugins/parallax.js'
 import { createLazyLoad } from '../src/plugins/lazyload.js'
+import { createDots } from '../src/plugins/dots.js'
+import { createArrows } from '../src/plugins/arrows.js'
+import { createAutoplay } from '../src/plugins/autoplay.js'
 
 class Element {
   constructor(tag = 'div') {
@@ -249,6 +252,54 @@ test('the plugin options proxy enumerates live resolved options and stays read-o
   assert.equal({ ...plugin.options }.slidesPerView, 2)
   assert.throws(() => { plugin.options.gap = 8 }, TypeError)
   carousel.destroy()
+})
+
+test('loop dots track every visited page, including modular wraparound', () => {
+  const { host, carousel } = mount(100, 5, {
+    loop: true, slidesPerScroll: 2, transitionDuration: 0, plugins: [createDots()],
+  })
+  const dots = host.children[0].children[1]
+  assert.equal(dots.children.length, 5)
+  for (const [page, index] of [[1, 2], [2, 4], [3, 1], [4, 3], [0, 0]]) {
+    carousel.next()
+    assert.equal(carousel.getIndex(), index)
+    assert.equal(dots.children[page].getAttribute('aria-current'), 'page')
+  }
+  carousel.destroy()
+})
+
+test('navigation arrows hide if no distinct destination exists', () => {
+  const { carousel, viewport } = mount(100, 1, { loop: true, plugins: [createArrows()] })
+  assert.equal(viewport.children[1].style.display, 'none')
+  assert.equal(viewport.children[2].style.display, 'none')
+  carousel.destroy()
+})
+
+test('autoplay retries a no-op navigation instead of stalling', async () => {
+  let navigations = 0
+  let secondAttempt
+  const retried = new Promise(resolve => { secondAttempt = resolve })
+  const plugin = createAutoplay({ interval: 1, pauseOnHover: false, pauseOnInteraction: false })
+  const context = {
+    getRoot: () => null,
+    getSlideCount: () => 3,
+    getSlidesPerView: () => 1,
+    getIndex: () => 0,
+    isLoop: () => true,
+    on: () => () => {},
+    emit: () => {},
+    next: () => { if (++navigations === 2) secondAttempt() },
+  }
+  plugin.install(context)
+  try {
+    await Promise.race([
+      retried,
+      new Promise((_, reject) => setTimeout(() => reject(new Error('autoplay retry timeout')), 500)),
+    ])
+    assert.ok(navigations >= 2)
+  } finally {
+    plugin.destroy()
+  }
 })
 
 test.after(() => { globalThis.performance = originalPerformance })

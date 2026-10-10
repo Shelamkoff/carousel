@@ -9,6 +9,7 @@ export function createDots(options = {}) {
   let ctx = null
   let unsubs = []
   let container = null
+  let loopAnchor = 0
   /** @type {HTMLElement[]} */
   let dotEls = []
 
@@ -20,12 +21,23 @@ export function createDots(options = {}) {
     const count = ctx.getSlideCount()
     if (count === 0) return []
     const step = Math.max(1, ctx.getSlidesPerScroll())
-    const maxIndex = ctx.isLoop()
-      ? count - 1
-      : Math.max(0, Math.ceil(count - ctx.getSlidesPerView()))
     const targets = []
+
+    if (ctx.isLoop()) {
+      // Loop navigation is modular. Fixed-step traversal can visit indices
+      // that are not multiples of step (e.g. N=5, step=2: 0,2,4,1,3).
+      let index = ((loopAnchor % count) + count) % count
+      const first = index
+      do {
+        targets.push(index)
+        index = (index + step) % count
+      } while (index !== first)
+      return targets
+    }
+
+    const maxIndex = Math.max(0, Math.ceil(count - ctx.getSlidesPerView()))
     for (let index = 0; index <= maxIndex; index += step) targets.push(index)
-    if (!ctx.isLoop() && targets.at(-1) !== maxIndex) targets.push(maxIndex)
+    if (targets.at(-1) !== maxIndex) targets.push(maxIndex)
     return targets
   }
 
@@ -70,6 +82,11 @@ export function createDots(options = {}) {
   }
 
   function updateActive() {
+    if (ctx?.isLoop() && !getTargets().includes(ctx.getIndex())) {
+      loopAnchor = ctx.getIndex()
+      buildDots()
+      return
+    }
     const active = getActivePage()
     for (let i = 0; i < dotEls.length; i++) {
       dotEls[i].classList.toggle('carousel__dot--active', i === active)
@@ -82,6 +99,7 @@ export function createDots(options = {}) {
 
     install(context) {
       ctx = context
+      loopAnchor = context.getIndex()
       const root = context.getRoot()
       if (!root) return
 
@@ -106,6 +124,7 @@ export function createDots(options = {}) {
       container = null
       dotEls = []
       ctx = null
+      loopAnchor = 0
     },
   }
 }
