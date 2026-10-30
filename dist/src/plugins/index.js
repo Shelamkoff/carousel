@@ -1,0 +1,8 @@
+export { createArrows } from './arrows.js'
+export { createDots } from './dots.js'
+export { createThumbnails } from './thumbnails.js'
+export { createKeyboard } from './keyboard.js'
+export { createSwipe } from './swipe.js'
+export { createAutoplay } from './autoplay.js'
+export { createLazyLoad } from './lazyload.js'
+export { createParallax } from './parallax.js'
