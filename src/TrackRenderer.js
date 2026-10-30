@@ -17,6 +17,8 @@ export class TrackRenderer {
   /** @type {ResizeObserver | null} */
   #slideResizeObserver = null
   /** @type {number} */
+  #observedLayoutFrame = 0
+  /** @type {number} */
   #slidesPerView = 1
   /** @type {number} */
   #gap = 0
@@ -88,13 +90,9 @@ export class TrackRenderer {
     if (!this.#viewport) return
     this.#lastViewportWidth = this.#viewport.offsetWidth
     this.#resizeObserver = new ResizeObserver(() => {
-      if (!this.#viewport) return
-      const w = this.#viewport.offsetWidth
-      if (w === this.#lastViewportWidth) return // skip if size unchanged
-      this.#lastViewportWidth = w
-      const previousSlideWidth = this.#slideWidth
-      this.#recalcSlideWidth()
-      this.#onResize?.(previousSlideWidth)
+      if (this.#viewport && this.#viewport.offsetWidth !== this.#lastViewportWidth) {
+        this.#scheduleObservedLayout()
+      }
     })
     this.#resizeObserver.observe(this.#viewport)
   }
@@ -103,8 +101,32 @@ export class TrackRenderer {
     this.#slideResizeObserver?.disconnect()
     this.#slideResizeObserver = null
     if (!this.#isLoop) return
-    this.#slideResizeObserver = new ResizeObserver(() => this.#updateTrackHeight())
+    this.#slideResizeObserver = new ResizeObserver(() => this.#scheduleObservedLayout())
     for (const slide of this.#slideElements) this.#slideResizeObserver.observe(slide)
+  }
+
+  #scheduleObservedLayout() {
+    if (this.#observedLayoutFrame) return
+    // Slide widths can change intrinsic media height and hence the observed
+    // viewport. Apply layout outside ResizeObserver delivery to avoid a loop.
+    this.#observedLayoutFrame = requestAnimationFrame(() => {
+      this.#observedLayoutFrame = 0
+      if (!this.#viewport) return
+      const width = this.#viewport.offsetWidth
+      if (width !== this.#lastViewportWidth) {
+        this.#lastViewportWidth = width
+        const previousSlideWidth = this.#slideWidth
+        this.#recalcSlideWidth()
+        this.#onResize?.(previousSlideWidth)
+      } else {
+        this.#updateTrackHeight()
+      }
+    })
+  }
+
+  #cancelObservedLayout() {
+    if (this.#observedLayoutFrame) cancelAnimationFrame(this.#observedLayoutFrame)
+    this.#observedLayoutFrame = 0
   }
 
   /** @param {(previousSlideWidth: number) => void} cb */
@@ -156,6 +178,7 @@ export class TrackRenderer {
   #recalcSlideWidth() {
     if (!this.#viewport) return
     const vw = this.#viewport.offsetWidth
+    this.#lastViewportWidth = vw
     const totalGap = this.#gap * (this.#slidesPerView - 1)
     this.#slideWidth = Math.max(0, (vw - totalGap) / this.#slidesPerView)
 
@@ -250,6 +273,7 @@ export class TrackRenderer {
   /** @param {import('./types').SlideData[]} slides @param {{ slidesPerView: number, gap: number, loop?: boolean }} layout */
   rebuild(slides, layout) {
     if (!this.#track) return
+    this.#cancelObservedLayout()
     this.#slideResizeObserver?.disconnect()
     this.#slideResizeObserver = null
     this.#isLoop = layout.loop ?? false
@@ -286,6 +310,7 @@ export class TrackRenderer {
   getSlideElement(index) { return this.#slideElements[index] ?? null }
 
   destroy() {
+    this.#cancelObservedLayout()
     this.stopAnimation()
     this.#resizeObserver?.disconnect()
     this.#resizeObserver = null

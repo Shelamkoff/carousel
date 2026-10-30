@@ -17,6 +17,7 @@
     "build": "node scripts/build-package.mjs",
     "test": "node --test",
     "prepublishOnly": "npm test",
+    "prepare": "npm run build",
     "prepack": "npm run build"
   },
   "dependencies": { "@shelamkoff/event-bus": "^1.0.0" },
