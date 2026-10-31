@@ -322,9 +322,62 @@ test('hidden containers retain startIndex until their width becomes measurable',
     assert.equal(carousel.getIndex(), 3)
     host.width = 300
     ResizeObserver.flush()
+    frame(16)
     assert.equal(carousel.getIndex(), 3)
     carousel.destroy()
   }
+})
+
+test('destroy releases a pending observed resize without mutating the retired view', () => {
+  const { host, carousel, track } = mount(100, 3, { transitionDuration: 0 })
+  const slide = track.children[0]
+  const beforeFrames = clock.frames.size
+  let resized = 0
+  carousel.on('resize', () => resized++)
+  host.width = 320
+  ResizeObserver.flush()
+  carousel.destroy()
+  const widthAfterDestroy = slide.style.width
+  const notificationsAfterDestroy = resized
+  assert.equal(clock.frames.size, beforeFrames)
+  frame(16)
+  assert.equal(slide.style.width, widthAfterDestroy)
+  assert.equal(resized, notificationsAfterDestroy)
+  assert.equal(host.children.length, 0)
+})
+
+test('rebuild releases an old pending observed resize and keeps the new layout', () => {
+  const { host, carousel, track } = mount(100, 3, { startIndex: 1, transitionDuration: 0 })
+  const beforeFrames = clock.frames.size
+  host.width = 320
+  ResizeObserver.flush()
+  carousel.update({ slidesPerView: 2 })
+  const indexAfterUpdate = carousel.getIndex()
+  const widthsAfterUpdate = track.children.map(slide => slide.style.width)
+  assert.equal(clock.frames.size, beforeFrames)
+  frame(16)
+  assert.equal(carousel.getIndex(), indexAfterUpdate)
+  assert.deepEqual(widthsAfterUpdate, ['160px', '160px', '160px'])
+  assert.deepEqual(track.children.map(slide => slide.style.width), widthsAfterUpdate)
+  carousel.destroy()
+})
+
+test('rebuild before an observed resize frame keeps the most visible loop originals interactive', () => {
+  const probe = { name: 'position-probe', install(ctx) { this.context = ctx } }
+  const { host, carousel, track } = mount(640, 2, {
+    loop: true, slidesPerView: 2, transitionDuration: 0, plugins: [probe],
+  })
+  host.width = 320
+  ResizeObserver.flush()
+  carousel.update({ gap: 0 })
+  probe.context.setPositionDrag(200)
+  // At 160px per slide, original #1 at -40 exposes 120px while its inert
+  // replica at 280 exposes only 40px. The original must keep that wider slot.
+  assert.equal(track.children[1].style.transform, 'translate3d(-40px, 0, 0)')
+  assert.equal(track.children[3].style.transform, 'translate3d(280px, 0, 0)')
+  frame(16)
+  assert.equal(track.children[1].style.transform, 'translate3d(-40px, 0, 0)')
+  carousel.destroy()
 })
 
 test('loop replicas never replace the interactive original in view', () => {
