@@ -19,6 +19,11 @@ jobs:
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      should_deploy: ${{ steps.branch_pages.outputs.should_deploy }}
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -47,8 +52,18 @@ jobs:
         with:
           path: ${{ steps.site.outputs.path }}
 
+      # The existing branch-based Pages build also runs on master pushes.
+      # Publish our staged artifact after it finishes so it cannot overwrite
+      # version.json or restore repository files to the public site.
+      - name: Wait for branch Pages deployment
+        id: branch_pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/wait-for-branch-pages.mjs
+
   deploy:
     needs: build
+    if: needs.build.outputs.should_deploy == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:

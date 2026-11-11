@@ -434,6 +434,8 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 GitHub Pages is published by `.github/workflows/pages.yml` on pushes to `master`, the configured Pages source branch. The workflow tests and builds the project, then stages only `index.html`, runtime JavaScript, CSS and demo assets through `scripts/build-pages.mjs`. It deploys a static artifact without Jekyll. `/version.json` records the deployed commit SHA. Generated staging directories live outside the repository.
 
+The repository also has GitHub's automatic branch Pages workflow. Before publishing the staged demo, `scripts/wait-for-branch-pages.mjs` waits for that workflow to finish for the same commit, then checks that `master` still points to this version. This prevents the automatic branch deployment from overwriting the clean demo artifact and skips obsolete queued versions. A missing run or API failure stops publication with a bounded timeout instead of silently racing another deployment. If changing Pages from a branch source to GitHub Actions in repository settings, update this gate alongside that change.
+
 To run the same demo locally:
 
 ```bash
