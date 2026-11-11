@@ -119,3 +119,44 @@ test('same-origin iframe elements use the owning viewport for responsive options
   })
   expect(result).toEqual({ initial: 1, expanded: 3, retained: false, content: 'Iframe slide' })
 })
+
+for (const transition of ['slide', 'fade']) {
+  test(`${transition} retains the last destination when its viewport shrinks during navigation`, async ({ page }) => {
+    const result = await page.evaluate(async transition => {
+      const { Carousel } = await import('/src/index.js')
+      const host = document.createElement('div')
+      host.style.width = '400px'
+      document.body.append(host)
+      let context
+      const carousel = new Carousel(host, Array.from({ length: 5 }, (_, index) => ({ content: String(index) })), {
+        transition, transitionDuration: 500,
+        plugins: [{ name: 'position-observer', install(ctx) { context = ctx } }],
+      })
+      const events = []
+      carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
+      carousel.on('resize', () => events.push('resize'))
+      carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
+      carousel.on('slide:change', ({ index, prevIndex }) => events.push(`change:${prevIndex}:${index}`))
+      try {
+        await new Promise(requestAnimationFrame)
+        await new Promise(requestAnimationFrame)
+        const completed = new Promise(resolve => carousel.once('transition:end', resolve))
+        carousel.goTo(4)
+        host.style.width = '200px'
+        await completed
+        await new Promise(requestAnimationFrame)
+        return {
+          index: carousel.getIndex(), position: context.getPosition(), step: context.getStep(), events,
+          slideWidth: host.querySelector('.carousel__slide').getBoundingClientRect().width,
+        }
+      } finally {
+        carousel.destroy()
+      }
+    }, transition)
+    expect(result.index).toBe(4)
+    expect(result.step).toBe(200)
+    expect(result.slideWidth).toBe(200)
+    expect(result.position).toBeCloseTo(4 * result.step, 5)
+    expect(result.events).toEqual(['start:4', 'resize', 'end:4', 'change:0:4'])
+  })
+}

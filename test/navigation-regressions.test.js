@@ -1011,3 +1011,99 @@ test('a decorative transition timer fallback synchronizes parallax without waiti
     carousel.destroy()
   }
 })
+
+for (const transition of ['slide', 'fade']) {
+  for (const scenario of [
+    { name: 'finite final slide', slidesPerView: 1, loop: false, target: 4, widths: [200] },
+    { name: 'finite final slide after growing', slidesPerView: 1, loop: false, target: 4, widths: [800, 200] },
+    { name: 'fractional finite final page', slidesPerView: 2.8, loop: false, target: 3, widths: [200] },
+    { name: 'fractional loop destination', slidesPerView: 2.5, loop: true, target: 4, widths: [800, 200] },
+  ]) {
+    test(`${transition} retains its ${scenario.name} when a pending resize shrinks the viewport`, { timeout: 1000 }, async () => {
+      const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+      const { host, carousel } = mount(400, 5, {
+        transition, transitionDuration: 120, plugins: [probe],
+        slidesPerView: scenario.slidesPerView, loop: scenario.loop,
+      })
+      const events = []
+      carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
+      carousel.on('resize', () => events.push('resize'))
+      carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
+      carousel.on('slide:change', ({ index, prevIndex }) => events.push(`change:${prevIndex}:${index}`))
+      try {
+        const completed = new Promise(resolve => carousel.once('transition:end', resolve))
+        carousel.goTo(scenario.target)
+        for (const width of scenario.widths) {
+          host.width = width
+          ResizeObserver.flush()
+          frame(16)
+        }
+        frame(200)
+        // Single-slide fade completes through its CSS fallback timer.
+        await completed
+        assert.equal(carousel.getIndex(), scenario.target)
+        const expectedPosition = (scenario.loop
+          ? scenario.target
+          : Math.min(scenario.target, 5 - scenario.slidesPerView)) * probe.ctx.getStep()
+        assert.ok(Math.abs(probe.ctx.getPosition() - expectedPosition) < 0.001)
+        frame(200)
+        assert.deepEqual(events, [
+          `start:${scenario.target}`, 'resize', `end:${scenario.target}`, `change:0:${scenario.target}`,
+        ])
+      } finally {
+        carousel.destroy()
+      }
+    })
+  }
+}
+
+for (const slidesPerView of [1, 2.8]) {
+  test(`snap-back retains its final page after a pending shrink with slidesPerView ${slidesPerView}`, () => {
+    const target = Math.ceil(5 - slidesPerView)
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    const { host, carousel } = mount(400, 5, {
+      startIndex: target, slidesPerView, transitionDuration: 120, plugins: [probe],
+    })
+    const events = []
+    carousel.on('resize', () => events.push('resize'))
+    carousel.on('transition:end', () => events.push('end'))
+    carousel.on('slide:change', () => events.push('change'))
+    try {
+      probe.ctx.setPositionDrag(probe.ctx.getPosition() - 30)
+      probe.ctx.snapBack(target)
+      host.width = 200
+      ResizeObserver.flush()
+      frame(16)
+      frame(200)
+      assert.equal(carousel.getIndex(), target)
+      assert.ok(Math.abs(probe.ctx.getPosition() - (5 - slidesPerView) * probe.ctx.getStep()) < 0.001)
+      assert.deepEqual(events, ['resize'])
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+test('a pending shrink handler can update or destroy without publishing obsolete navigation events', () => {
+  for (const action of ['update', 'destroy']) {
+    const { host, carousel } = mount(400, 5, { transitionDuration: 120 })
+    const events = []
+    carousel.on('transition:end', () => events.push('end'))
+    carousel.on('slide:change', () => events.push('change'))
+    carousel.once('resize', () => {
+      if (action === 'update') carousel.update({ gap: 2 })
+      else carousel.destroy()
+    })
+    try {
+      carousel.goTo(4)
+      host.width = 200
+      ResizeObserver.flush()
+      frame(16)
+      frame(200)
+      assert.deepEqual(events, [])
+      if (action === 'update') assert.equal(carousel.getIndex(), 4)
+    } finally {
+      carousel.destroy()
+    }
+  }
+})

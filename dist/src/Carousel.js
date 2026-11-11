@@ -231,12 +231,13 @@ export class Carousel {
     })
   }
 
-  #applyResize(previousStep = this.#step()) {
-    const idx = previousStep <= 0
+  /** @param {number} [previousStep] @param {number} [targetIndex] */
+  #applyResize(previousStep = this.#step(), targetIndex) {
+    const idx = targetIndex ?? (previousStep <= 0
       ? this.#selectedIndex
       : this.#loop
         ? this.#loop.toIndex(this.#position)
-        : this.#finiteIndex(previousStep)
+        : this.#finiteIndex(previousStep))
     this.#pendingResize = false
     this.#pendingResizeStep = null
     this.#initLoop()
@@ -343,7 +344,9 @@ export class Carousel {
       this.#pendingResize = false
       const previousStep = this.#pendingResizeStep ?? this.#step()
       this.#pendingResizeStep = null
-      this.#applyResize(previousStep)
+      // A narrower layout may already have clamped the old pixel coordinate.
+      // Completion preserves its logical destination instead of decoding it.
+      this.#applyResize(previousStep, this.#selectedIndex)
     }
     if (this.#destroyed || this.#navigationEpoch !== epoch) return
 
@@ -784,7 +787,7 @@ export class Carousel {
       this.#animating = false
       if (this.#pendingResize) {
         const previousStep = this.#pendingResizeStep ?? this.#step()
-        this.#applyResize(previousStep)
+        this.#applyResize(previousStep, this.#selectedIndex)
       }
     })
   }
