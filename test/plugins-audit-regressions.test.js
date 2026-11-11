@@ -469,11 +469,57 @@ test('keyboard navigation respects consumed events and modifier shortcuts', () =
   const plugin = createKeyboard()
   plugin.install(navigationContext(root, { next() { navigations++ } }))
   try {
-    for (const options of [{ defaultPrevented: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }]) {
+    for (const options of [{ defaultPrevented: true }, { altKey: true }, { ctrlKey: true }, { metaKey: true }, { isComposing: true }]) {
       root.dispatch({ type: 'keydown', key: 'ArrowRight', preventDefault() {}, ...options })
     }
     assert.equal(navigations, 0)
     root.dispatch({ type: 'keydown', key: 'ArrowRight', preventDefault() {} })
+    assert.equal(navigations, 1)
+  } finally {
+    plugin.destroy()
+  }
+})
+
+test('keyboard leaves shadow-tree editors alone without disabling the surrounding component', () => {
+  const root = Object.assign(new EventTarget(), {
+    setAttribute() {}, getAttribute() { return '0' }, removeAttribute() {},
+  })
+  const host = { tagName: 'CUSTOM-EDITOR', isContentEditable: false }
+  const shadow = { nodeType: 11, host }
+  const plugin = createKeyboard()
+  let navigations = 0
+  plugin.install(navigationContext(root, { next() { navigations++ } }))
+  // Native Event cancellation remains observable. Only the shadow retargeting
+  // and composed path are supplied because Node does not implement a DOM tree.
+  function keydown(target, path) {
+    const event = new Event('keydown', { bubbles: true, composed: true, cancelable: true })
+    Object.defineProperties(event, {
+      target: { value: target },
+      key: { value: 'ArrowRight' },
+      composedPath: { value: path === undefined ? undefined : () => path },
+    })
+    root.dispatchEvent(event)
+    return event.defaultPrevented
+  }
+  try {
+    const editors = [
+      { tagName: 'INPUT' },
+      { tagName: 'TEXTAREA' },
+      { tagName: 'SELECT' },
+      { tagName: 'DIV', isContentEditable: true },
+    ]
+    const prevented = editors.map(editor => keydown(host, [editor, shadow, host, root]))
+    prevented.push(keydown(editors[0], undefined), keydown(editors[1], []))
+    const editorNavigations = navigations
+
+    // A non-editing node in the same component still delegates navigation.
+    // The scope ends at the carousel root, before an editable outer ancestor.
+    const button = { tagName: 'BUTTON', isContentEditable: false }
+    const outerEditor = { tagName: 'DIV', isContentEditable: true }
+    const componentPrevented = keydown(host, [button, shadow, host, root, outerEditor])
+    assert.deepEqual(prevented, [false, false, false, false, false, false])
+    assert.equal(editorNavigations, 0)
+    assert.equal(componentPrevented, true)
     assert.equal(navigations, 1)
   } finally {
     plugin.destroy()

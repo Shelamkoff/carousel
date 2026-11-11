@@ -26,15 +26,20 @@ export function createKeyboard(options = {}) {
       handler = /** @param {KeyboardEvent} e */ (e) => {
         // Let nested widgets and browser/application shortcuts own their keys.
         if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return
-        // Skip editable elements
-        const tag = /** @type {HTMLElement} */ (e.target).tagName
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
-        if (/** @type {HTMLElement} */ (e.target).isContentEditable) return
+        // Shadow DOM retargets events to the component host. Inspect the
+        // visible path so nested editors retain their native cursor keys.
+        const root = context.getRoot()
+        const path = e.composedPath?.() ?? []
+        for (const node of path.length ? path : [e.target]) {
+          const element = /** @type {HTMLElement} */ (node)
+          const tag = element?.tagName
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element?.isContentEditable) return
+          if (node === root) break
+        }
 
         // Document scope: only respond if focus is inside this carousel (or body/document)
         if (scope === 'document') {
           const focused = ownerDocument.activeElement
-          const root = context.getRoot()
           if (focused && focused !== ownerDocument.body && root && !root.contains(focused)) return
         }
 

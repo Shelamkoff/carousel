@@ -108,6 +108,70 @@ test('plugins follow keyboard, pointer and lazy rendering events in the owning i
   expect(errors).toEqual([])
 })
 
+for (const kind of ['input', 'textarea', 'contenteditable']) {
+  test(`keyboard preserves the caret inside a shadow ${kind} and still navigates from other controls`, async ({ page }) => {
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto('/tests/browser/lifecycle.html')
+    await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+    await page.evaluate(async kind => {
+      const { Carousel, createKeyboard } = await import('/src/index.js')
+      const host = document.createElement('div')
+      host.style.width = '400px'
+      document.body.appendChild(host)
+      const component = document.createElement('div')
+      component.id = 'audit-shadow-component'
+      const shadow = component.attachShadow({ mode: 'open' })
+      const editor = document.createElement(kind === 'contenteditable' ? 'div' : kind)
+      editor.id = 'audit-shadow-editor'
+      if (kind === 'contenteditable') {
+        editor.contentEditable = 'true'
+        editor.textContent = 'abcd'
+      } else {
+        editor.value = 'abcd'
+      }
+      const button = document.createElement('button')
+      button.id = 'audit-shadow-control'
+      button.type = 'button'
+      button.textContent = 'Non-editing control'
+      shadow.append(editor, button)
+      window.__shadowKeyboardCarousel = new Carousel(host, [
+        { content: () => component },
+        { content: 'Second slide' },
+        { content: 'Third slide' },
+      ], { transitionDuration: 0, plugins: [createKeyboard()] })
+      editor.focus()
+      if (kind === 'contenteditable') {
+        const range = document.createRange()
+        range.setStart(editor.firstChild, 1)
+        range.collapse(true)
+        const selection = document.getSelection()
+        selection.removeAllRanges()
+        selection.addRange(range)
+      } else {
+        editor.setSelectionRange(1, 1)
+      }
+    }, kind)
+
+    const readState = () => page.evaluate(kind => {
+      const editor = document.querySelector('#audit-shadow-component').shadowRoot.querySelector('#audit-shadow-editor')
+      return {
+        index: window.__shadowKeyboardCarousel.getIndex(),
+        caret: kind === 'contenteditable' ? document.getSelection().anchorOffset : editor.selectionStart,
+      }
+    }, kind)
+    expect(await readState()).toEqual({ index: 0, caret: 1 })
+    await page.keyboard.press('ArrowRight')
+    expect(await readState()).toEqual({ index: 0, caret: 2 })
+
+    await page.locator('#audit-shadow-control').focus()
+    await page.keyboard.press('ArrowRight')
+    expect(await page.evaluate(() => window.__shadowKeyboardCarousel.getIndex())).toBe(1)
+    await page.evaluate(() => window.__shadowKeyboardCarousel.destroy())
+    expect(errors).toEqual([])
+  })
+}
+
 test('lazy loading preserves the newest successful render after a nested update', async ({ page }) => {
   await page.goto('/tests/browser/lifecycle.html')
   await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
