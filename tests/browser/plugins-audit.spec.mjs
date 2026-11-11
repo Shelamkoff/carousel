@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-test('swipe preserves ordinary clicks on links and buttons inside slides', async ({ page }) => {
+test('swipe preserves ordinary clicks and suppresses clicks after dragging a slide', async ({ page }) => {
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
   await page.goto('/tests/browser/lifecycle.html')
@@ -11,6 +11,7 @@ test('swipe preserves ordinary clicks on links and buttons inside slides', async
     host.style.width = '600px'
     document.body.appendChild(host)
     const content = document.createElement('div')
+    content.style.padding = '20px 240px'
     const link = document.createElement('a')
     link.id = 'audit-slide-link'
     link.href = '#audit-target'
@@ -20,6 +21,10 @@ test('swipe preserves ordinary clicks on links and buttons inside slides', async
     button.type = 'button'
     button.textContent = 'Slide button'
     window.__auditClicks = { link: 0, button: 0 }
+    window.__auditPointerClicks = 0
+    host.addEventListener('click', event => {
+      if (event.detail > 0) window.__auditPointerClicks++
+    })
     link.addEventListener('click', event => {
       event.preventDefault()
       window.__auditClicks.link++
@@ -36,6 +41,16 @@ test('swipe preserves ordinary clicks on links and buttons inside slides', async
   await page.locator('#audit-slide-button').click()
   expect(await page.evaluate(() => window.__auditClicks)).toEqual({ link: 1, button: 1 })
   expect(await page.evaluate(() => window.__auditCarousel.getIndex())).toBe(0)
+  const link = await page.locator('#audit-slide-link').boundingBox()
+  const startX = link.x + link.width / 2
+  const startY = link.y + link.height / 2
+  await page.mouse.move(startX, startY)
+  await page.mouse.down()
+  await page.mouse.move(startX - 180, startY, { steps: 6 })
+  await page.mouse.up()
+  expect(await page.evaluate(() => window.__auditCarousel.getIndex())).toBe(1)
+  expect(await page.evaluate(() => window.__auditClicks)).toEqual({ link: 1, button: 1 })
+  expect(await page.evaluate(() => window.__auditPointerClicks)).toBe(2)
   await page.evaluate(() => window.__auditCarousel.destroy())
   expect(errors).toEqual([])
 })

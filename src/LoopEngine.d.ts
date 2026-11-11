@@ -7,5 +7,6 @@ export class LoopEngine {
   normalize(pos: number): number
   toIndex(pos: number): number
   shortestDelta(currentPos: number, targetIndex: number): number
+  directedDelta(currentPos: number, targetIndex: number, direction: 1 | -1): number
   positionSlides(slides: HTMLElement[], position: number, viewportWidth?: number, slideWidth?: number): void
 }

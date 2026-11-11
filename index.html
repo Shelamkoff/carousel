@@ -24,6 +24,12 @@
       font-size: 2rem;
     }
 
+    .demo-header { max-width: 800px; margin: 0 auto 40px; }
+    .demo-header h1 { margin-bottom: 16px; line-height: 1.2; }
+    .demo-intro { max-width: 65ch; margin: 0 auto 16px; line-height: 1.5; text-align: center; color: #555; }
+    .demo-links { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px 20px; }
+    .demo-links a { color: #354791; text-underline-offset: 4px; }
+
     h2 {
       margin: 40px 0 16px;
       font-weight: 500;
@@ -55,6 +61,25 @@
       background: #f0f0f0;
     }
 
+    .demo-controls button:disabled { cursor: default; opacity: .5; }
+    .demo-controls button:focus-visible, .demo-links a:focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
+    .demo-note { color: #555; line-height: 1.5; margin-bottom: 16px; max-width: 65ch; }
+    .demo-status { display: block; margin-top: 12px; color: #444; font-size: .875rem; line-height: 1.5; }
+    .height-host { width: 100%; transition: width .25s ease; }
+    .height-host--narrow { width: 65%; }
+    .height-figure { margin: 0; background: #fff; border-radius: 8px; overflow: hidden; }
+    .height-figure img { display: block; width: 100%; height: auto; }
+    .height-figure figcaption { padding: 16px 20px; line-height: 1.5; }
+    .height-figure p { margin-top: 8px; }
+    .lazy-card { min-height: 180px; padding: 24px; display: grid; align-content: center; gap: 12px; background: #e9edf7; border-radius: 8px; }
+    .person-initials { display: grid; width: 100%; height: 100%; place-items: center; background: #e9edf7; color: #354791; font-weight: 600; }
+    @media (max-width: 480px) {
+      body { padding: 24px 16px; }
+      h1 { font-size: 1.5rem; }
+      .height-host--narrow { width: 80%; }
+    }
+    @media (prefers-reduced-motion: reduce) { .height-host { transition: none; } }
+
     /* Demo slide styles */
     .demo-slide {
       display: flex;
@@ -73,6 +98,7 @@
     .demo-slide--4 { background: linear-gradient(135deg, #43e97b, #38f9d7); }
     .demo-slide--5 { background: linear-gradient(135deg, #fa709a, #fee140); }
     .demo-slide--6 { background: linear-gradient(135deg, #a18cd1, #fbc2eb); }
+    .demo-slide--2, .demo-slide--3, .demo-slide--4, .demo-slide--5, .demo-slide--6 { color: #17202b; }
 
     .demo-slide img {
       width: 100%;
@@ -216,10 +242,20 @@
 </head>
 <body data-status="running">
 
-  <h1>@shelamkoff/carousel — Live Examples</h1>
+  <header class="demo-header">
+    <h1>@shelamkoff/carousel — Live Examples</h1>
+    <p class="demo-intro">Try the arrows, drag a slide, or focus the first carousel and use the arrow keys. Resize the page to explore responsive layouts.</p>
+    <nav class="demo-links" aria-label="Demo navigation">
+      <a href="#basic-example">Navigation</a>
+      <a href="#height-example">Auto-height</a>
+      <a href="#dynamic-example">Dynamic slides</a>
+      <a href="#lazy-example">Lazy loading</a>
+      <a href="https://github.com/Shelamkoff/carousel">Source and API</a>
+    </nav>
+  </header>
 
   <!-- Demo 1: Basic with arrows, dots, keyboard, swipe -->
-  <div class="demo-section">
+  <div class="demo-section" id="basic-example">
     <h2>1. Basic Carousel (arrows + dots + keyboard + swipe)</h2>
     <div id="demo-basic"></div>
   </div>
@@ -282,10 +318,39 @@
     <div id="demo-fractional-loop"></div>
   </div>
 
+  <section class="demo-section" id="height-example">
+    <h2>11. Auto-height with responsive media</h2>
+    <p class="demo-note">The loop follows the tallest slide as images resize and captions change.</p>
+    <div id="demo-height" class="height-host"></div>
+    <div class="demo-controls">
+      <button type="button" id="btn-height-width" aria-pressed="false">Narrow the carousel</button>
+      <button type="button" id="btn-height-caption" aria-pressed="false">Expand the caption</button>
+    </div>
+  </section>
+
+  <section class="demo-section" id="dynamic-example">
+    <h2>12. Add, remove and remount slides</h2>
+    <p class="demo-note">Change the collection while navigating, then destroy and recreate the carousel.</p>
+    <div id="demo-dynamic"></div>
+    <div class="demo-controls">
+      <button type="button" id="btn-add-slide">Add a slide</button>
+      <button type="button" id="btn-remove-slide">Remove selected slide</button>
+      <button type="button" id="btn-remount">Destroy carousel</button>
+    </div>
+    <output id="dynamic-status" class="demo-status" aria-live="polite"></output>
+  </section>
+
+  <section class="demo-section" id="lazy-example">
+    <h2>13. Lazy content</h2>
+    <p class="demo-note">A slide is created when it becomes visible or enters the one-slide preload range.</p>
+    <div id="demo-lazy"></div>
+    <output id="lazy-status" class="demo-status" aria-live="polite"></output>
+  </section>
+
   <script type="importmap">
     {
       "imports": {
-        "@shelamkoff/event-bus": "https://cdn.jsdelivr.net/npm/@shelamkoff/event-bus@1.0.0/+esm"
+        "@shelamkoff/event-bus": "./demo-assets/event-bus/index.js"
       }
     }
   </script>
@@ -299,6 +364,7 @@
       createAutoplay,
       createThumbnails,
       createParallax,
+      createLazyLoad,
     } from './src/index.js'
 
     // ── Slide data ──
@@ -315,14 +381,10 @@
       content: `<div class="demo-card"><h3>Card ${i + 1}</h3><p>Description for card ${i + 1}</p></div>`,
     }))
 
-    const imageSlides = [
-      { content: '<div class="demo-slide demo-slide--1">Image 1</div>', thumb: 'https://picsum.photos/id/10/120/80' },
-      { content: '<div class="demo-slide demo-slide--2">Image 2</div>', thumb: 'https://picsum.photos/id/20/120/80' },
-      { content: '<div class="demo-slide demo-slide--3">Image 3</div>', thumb: 'https://picsum.photos/id/30/120/80' },
-      { content: '<div class="demo-slide demo-slide--4">Image 4</div>', thumb: 'https://picsum.photos/id/40/120/80' },
-      { content: '<div class="demo-slide demo-slide--5">Image 5</div>', thumb: 'https://picsum.photos/id/50/120/80' },
-      { content: '<div class="demo-slide demo-slide--6">Image 6</div>', thumb: 'https://picsum.photos/id/60/120/80' },
-    ]
+    const imageSlides = Array.from({ length: 6 }, (_, i) => ({
+      content: `<div class="demo-slide demo-slide--${i + 1}">Image ${i + 1}</div>`,
+      thumb: `./demo-assets/panel-${i + 1}.svg`,
+    }))
 
     // ── Person card data ──
 
@@ -330,7 +392,7 @@
     const ICON_TWITTER = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4l11.733 16h4.267l-11.733-16z"/><path d="M4 20l6.768-6.768m2.46-2.46l6.772-6.772"/></svg>'
     const ICON_WEB = '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>'
 
-    function personCard({ avatar, name, role, bio, links }) {
+    function personCard({ name, role, bio, links }) {
       const linksHtml = (links || []).map(l =>
         `<a class="person-card__link" href="${l.url}" target="_blank" rel="noopener">${l.icon} ${l.label}</a>`
       ).join('')
@@ -338,7 +400,7 @@
       return `
         <div class="person-card">
           <div class="person-card__avatar">
-            <img src="${avatar}" alt="${name}" loading="lazy">
+            <span class="person-initials" aria-hidden="true">${name.split(' ').map(part => part[0]).join('')}</span>
           </div>
           <div class="person-card__info">
             <div class="person-card__name">${name}</div>
@@ -351,7 +413,6 @@
 
     const persons = [
       {
-        avatar: 'https://i.pravatar.cc/160?img=11',
         name: 'Anna Petrova',
         role: 'Lead Frontend Engineer',
         bio: 'Building scalable design systems and component libraries. 8+ years in web development.',
@@ -361,7 +422,6 @@
         ],
       },
       {
-        avatar: 'https://i.pravatar.cc/160?img=12',
         name: 'Dmitry Volkov',
         role: 'Backend Architect',
         bio: 'Designing high-load distributed systems. PHP, Go, PostgreSQL. Open-source contributor.',
@@ -371,7 +431,6 @@
         ],
       },
       {
-        avatar: 'https://i.pravatar.cc/160?img=32',
         name: 'Elena Sokolova',
         role: 'UX/UI Designer',
         bio: 'Creating intuitive interfaces for complex products. Figma, prototyping, user research.',
@@ -380,7 +439,6 @@
         ],
       },
       {
-        avatar: 'https://i.pravatar.cc/160?img=53',
         name: 'Maxim Ivanov',
         role: 'DevOps Engineer',
         bio: 'Kubernetes, CI/CD pipelines, infrastructure as code. Making deployments boring.',
@@ -389,7 +447,6 @@
         ],
       },
       {
-        avatar: 'https://i.pravatar.cc/160?img=47',
         name: 'Olga Kuznetsova',
         role: 'Product Manager',
         bio: 'Bridging business goals with user needs. Data-driven decisions, agile methodology.',
@@ -399,7 +456,6 @@
         ],
       },
       {
-        avatar: 'https://i.pravatar.cc/160?img=60',
         name: 'Sergey Morozov',
         role: 'Mobile Developer',
         bio: 'Cross-platform apps with React Native and Flutter. Performance optimization enthusiast.',
@@ -535,13 +591,9 @@
     })
 
     // ── Demo 9: Parallax (loop + images) ──
-    const parallaxSlides = [
-      { content: '<img src="https://picsum.photos/id/10/800/400" alt="">' },
-      { content: '<img src="https://picsum.photos/id/20/800/400" alt="">' },
-      { content: '<img src="https://picsum.photos/id/30/800/400" alt="">' },
-      { content: '<img src="https://picsum.photos/id/40/800/400" alt="">' },
-      { content: '<img src="https://picsum.photos/id/50/800/400" alt="">' },
-    ]
+    const parallaxSlides = Array.from({ length: 5 }, (_, i) => ({
+      content: `<img src="./demo-assets/panel-${i + 1}.svg" alt="Geometric panel ${i + 1}" width="800" height="400">`,
+    }))
 
     const parallax = new Carousel('#demo-parallax', parallaxSlides, {
       slidesPerView: 2,
@@ -570,6 +622,112 @@
       ariaLabel: 'Fractional carousel example',
       plugins: [createArrows(), createDots(), createSwipe({ mouse: true })],
       breakpoints: { 0: { slidesPerView: 1.25 }, 620: { slidesPerView: 2.5 } },
+    })
+
+    // ── Demo 11: intrinsic media size + changing captions ──
+    const heightFigures = [1, 2].map(index => {
+      const figure = document.createElement('figure')
+      figure.className = 'height-figure'
+      const image = document.createElement('img')
+      image.src = `./demo-assets/panel-${index}.svg`
+      image.alt = `Geometric panel ${index}`
+      image.width = 800
+      image.height = 400
+      const caption = document.createElement('figcaption')
+      caption.textContent = `Panel ${index}. The image keeps its natural aspect ratio.`
+      figure.append(image, caption)
+      return figure
+    })
+    new Carousel('#demo-height', heightFigures.map(content => ({ content: () => content })), {
+      loop: true, ariaLabel: 'Auto-height example',
+      plugins: [createArrows(), createDots(), createSwipe({ mouse: true })],
+    })
+    const widthButton = document.getElementById('btn-height-width')
+    widthButton.addEventListener('click', () => {
+      const narrow = document.getElementById('demo-height').classList.toggle('height-host--narrow')
+      widthButton.setAttribute('aria-pressed', String(narrow))
+      widthButton.textContent = narrow ? 'Use full width' : 'Narrow the carousel'
+    })
+    const captionButton = document.getElementById('btn-height-caption')
+    captionButton.addEventListener('click', () => {
+      const caption = heightFigures[0].querySelector('figcaption')
+      const existing = caption.querySelector('p')
+      if (existing) existing.remove()
+      else {
+        const paragraph = document.createElement('p')
+        paragraph.textContent = 'Extra content can arrive after mounting. The surrounding layout follows the new slide height without a manual update call.'
+        caption.append(paragraph)
+      }
+      captionButton.setAttribute('aria-pressed', String(!existing))
+      captionButton.textContent = existing ? 'Expand the caption' : 'Collapse the caption'
+    })
+
+    // ── Demo 12: public collection and teardown API ──
+    let dynamic = null
+    let nextCard = 4
+    const dynamicStatus = document.getElementById('dynamic-status')
+    const addButton = document.getElementById('btn-add-slide')
+    const removeButton = document.getElementById('btn-remove-slide')
+    const remountButton = document.getElementById('btn-remount')
+    const dynamicSlide = number => ({ content: () => {
+      const card = document.createElement('article')
+      card.className = 'demo-card'
+      const title = document.createElement('h3')
+      title.textContent = `Card ${number}`
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.textContent = 'Click inside this slide'
+      let clicks = 0
+      button.addEventListener('click', () => { button.textContent = `Clicked ${++clicks} times` })
+      card.append(title, button)
+      return card
+    } })
+    function updateDynamicStatus() {
+      const count = dynamic?.getSlides().length ?? 0
+      dynamicStatus.textContent = dynamic
+        ? count ? `${count} slides · selected ${dynamic.getIndex() + 1}` : 'No slides. Add one to continue.'
+        : 'Carousel destroyed. Mount it again to continue.'
+      addButton.disabled = !dynamic
+      removeButton.disabled = !dynamic || count === 0
+      remountButton.textContent = dynamic ? 'Destroy carousel' : 'Mount carousel'
+    }
+    function mountDynamic() {
+      dynamic = new Carousel('#demo-dynamic', [1, 2, 3].map(dynamicSlide), {
+        loop: true, ariaLabel: 'Dynamic slides example',
+        plugins: [createArrows(), createDots(), createSwipe({ mouse: true })],
+      })
+      dynamic.on('slide:change', updateDynamicStatus)
+      updateDynamicStatus()
+    }
+    mountDynamic()
+    addButton.addEventListener('click', () => { dynamic?.addSlide(dynamicSlide(nextCard++)); updateDynamicStatus() })
+    removeButton.addEventListener('click', () => { dynamic?.removeSlide(dynamic.getIndex()); updateDynamicStatus() })
+    remountButton.addEventListener('click', () => {
+      if (dynamic) { dynamic.destroy(); dynamic = null; updateDynamicStatus() }
+      else mountDynamic()
+    })
+
+    // ── Demo 13: factories run when lazy content enters the preload range ──
+    const rendered = new Set()
+    const lazyStatus = document.getElementById('lazy-status')
+    const lazySlides = Array.from({ length: 8 }, (_, index) => ({
+      lazy: true,
+      content: () => {
+        rendered.add(index)
+        lazyStatus.textContent = `${rendered.size} of 8 slides created`
+        const card = document.createElement('article')
+        card.className = 'lazy-card'
+        const heading = document.createElement('h3')
+        heading.textContent = `Lazy slide ${index + 1}`
+        const description = document.createElement('p')
+        description.textContent = 'This content was created by its render function.'
+        card.append(heading, description)
+        return card
+      },
+    }))
+    new Carousel('#demo-lazy', lazySlides, {
+      ariaLabel: 'Lazy content example',
+      plugins: [createArrows(), createDots(), createLazyLoad({ preload: 1 })],
     })
 
     document.body.dataset.status = 'pass'

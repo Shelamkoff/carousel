@@ -1,3 +1,5 @@
+import { getLastSlideIndex } from '../navigation.js'
+
 /**
  * Dots plugin — pagination based on slidesPerScroll.
  *
@@ -28,14 +30,15 @@ export function createDots(options = {}) {
       // that are not multiples of step (e.g. N=5, step=2: 0,2,4,1,3).
       let index = ((loopAnchor % count) + count) % count
       const first = index
+      const loopStep = step % count
       do {
         targets.push(index)
-        index = (index + step) % count
+        index = (index + loopStep) % count
       } while (index !== first)
       return targets
     }
 
-    const maxIndex = Math.max(0, Math.ceil(count - ctx.getSlidesPerView()))
+    const maxIndex = getLastSlideIndex(count, ctx.getSlidesPerView())
     for (let index = 0; index <= maxIndex; index += step) targets.push(index)
     if (targets.at(-1) !== maxIndex) targets.push(maxIndex)
     return targets
@@ -54,6 +57,8 @@ export function createDots(options = {}) {
 
   function buildDots() {
     if (!container || !ctx) return
+    const owner = ctx
+    const document = container.ownerDocument ?? globalThis.document
     container.innerHTML = ''
     dotEls = []
 
@@ -67,7 +72,7 @@ export function createDots(options = {}) {
         dot.type = 'button'
         dot.setAttribute('aria-label', `Go to page ${i + 1}`)
         dot.addEventListener('click', () => {
-          ctx.goTo(targets[i])
+          if (ctx === owner && dotEls[i] === dot) owner.goTo(targets[i])
         })
       } else {
         dot.setAttribute('role', 'img')
@@ -102,6 +107,7 @@ export function createDots(options = {}) {
       loopAnchor = context.getIndex()
       const root = context.getRoot()
       if (!root) return
+      const document = root.ownerDocument ?? globalThis.document
 
       container = document.createElement('div')
       container.className = 'carousel__dots'

@@ -2,13 +2,14 @@
  * Keyboard plugin — arrow key navigation.
  *
  * @param {object} [options]
- * @param {'document' | 'container'} [options.scope='document'] — event listener scope
+ * @param {'document' | 'container'} [options.scope='container'] — event listener scope
  * @returns {import('../types').CarouselPlugin}
  */
 export function createKeyboard(options = {}) {
   let ctx = null
   let handler = null
   let target = null
+  let ownerDocument = null
 
   const scope = options.scope ?? 'container'
   if (scope !== 'container' && scope !== 'document') {
@@ -20,8 +21,11 @@ export function createKeyboard(options = {}) {
 
     install(context) {
       ctx = context
+      ownerDocument = context.getRoot()?.ownerDocument ?? globalThis.document
 
       handler = /** @param {KeyboardEvent} e */ (e) => {
+        // Let nested widgets and browser/application shortcuts own their keys.
+        if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.isComposing) return
         // Skip editable elements
         const tag = /** @type {HTMLElement} */ (e.target).tagName
         if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return
@@ -29,9 +33,9 @@ export function createKeyboard(options = {}) {
 
         // Document scope: only respond if focus is inside this carousel (or body/document)
         if (scope === 'document') {
-          const focused = document.activeElement
+          const focused = ownerDocument.activeElement
           const root = context.getRoot()
-          if (focused && focused !== document.body && root && !root.contains(focused)) return
+          if (focused && focused !== ownerDocument.body && root && !root.contains(focused)) return
         }
 
         switch (e.key) {
@@ -60,7 +64,7 @@ export function createKeyboard(options = {}) {
           target.setAttribute('tabindex', '0')
         }
       } else {
-        target = document
+        target = ownerDocument
       }
 
       target?.addEventListener('keydown', handler)
@@ -75,6 +79,7 @@ export function createKeyboard(options = {}) {
       }
       target = null
       handler = null
+      ownerDocument = null
       ctx = null
     },
   }

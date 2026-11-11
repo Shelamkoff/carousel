@@ -23,10 +23,18 @@ export function createParallax(options = {}) {
   let running = false
   let transitioning = false
   let settleRafId = 0
+  let ownerWindow = null
 
   const factor = options.factor ?? 0.2
   if (!Number.isFinite(factor)) throw new TypeError('Carousel parallax factor must be finite')
   const factorBase = Math.max(0, Math.min(factor, 1))
+
+  const requestFrame = callback => ownerWindow
+    ? ownerWindow.requestAnimationFrame(callback)
+    : requestAnimationFrame(callback)
+  const cancelFrame = id => ownerWindow
+    ? ownerWindow.cancelAnimationFrame(id)
+    : cancelAnimationFrame(id)
 
   function wrapSlides() {
     if (!ctx) return
@@ -34,6 +42,7 @@ export function createParallax(options = {}) {
     tweenFactor = factorBase * ctx.getSlideCount()
 
     layers = slides.map(slide => {
+      const document = slide.ownerDocument ?? globalThis.document
       let parallax = slide.querySelector('.carousel__parallax')
       if (!parallax) {
         parallax = document.createElement('div')
@@ -69,18 +78,15 @@ export function createParallax(options = {}) {
   }
 
   function update() {
-    if (!ctx) { running = false; rafId = 0; return }
+    if (!ctx) return
     const step = ctx.getStep()
-    if (step <= 0) {
-      if (running) rafId = requestAnimationFrame(update)
-      return
-    }
+    if (step <= 0) return
 
     const engine = ctx.getLoopEngine()
     const pos = getVisualPosition()
     const count = ctx.getSlideCount()
     const visualSlides = ctx.getVisualElements()
-    if (count === 0) { running = false; rafId = 0; return }
+    if (count === 0) return
 
     for (let i = 0; i < layers.length; i++) {
       if (!layers[i]) continue
@@ -103,25 +109,27 @@ export function createParallax(options = {}) {
       layers[i].style.transform = `translateX(${translate}%)`
     }
 
-    if (running) {
-      rafId = requestAnimationFrame(update)
-    } else {
-      rafId = 0
-    }
+  }
+
+  function tick() {
+    rafId = 0
+    if (!running || !ctx) return
+    update()
+    if (running) rafId = requestFrame(tick)
   }
 
   /** Start the rAF loop (idempotent). */
   function startLoop() {
     if (running) return
     running = true
-    rafId = requestAnimationFrame(update)
+    rafId = requestFrame(tick)
   }
 
   /** Stop the rAF loop and run one final update to settle. */
   function stopLoop() {
     running = false
     if (rafId) {
-      cancelAnimationFrame(rafId)
+      cancelFrame(rafId)
       rafId = 0
     }
     // One final frame to land at exact position
@@ -131,7 +139,7 @@ export function createParallax(options = {}) {
   // snapBack() intentionally emits no transition events. After pointerup,
   // keep updating the effect until the position has stopped changing.
   function settleWhenIdle() {
-    if (settleRafId) cancelAnimationFrame(settleRafId)
+    if (settleRafId) cancelFrame(settleRafId)
     let last = ctx?.getPosition() ?? 0
     let stableFrames = 0
     const check = () => {
@@ -141,9 +149,9 @@ export function createParallax(options = {}) {
       stableFrames = Math.abs(position - last) < 0.001 ? stableFrames + 1 : 0
       last = position
       if (stableFrames >= 2) { stopLoop(); return }
-      settleRafId = requestAnimationFrame(check)
+      settleRafId = requestFrame(check)
     }
-    settleRafId = requestAnimationFrame(check)
+    settleRafId = requestFrame(check)
   }
 
   return {
@@ -151,6 +159,7 @@ export function createParallax(options = {}) {
 
     install(context) {
       ctx = context
+      ownerWindow = context.getViewport()?.ownerDocument?.defaultView ?? null
       wrapSlides()
 
       // Initial position (single frame)
@@ -164,8 +173,11 @@ export function createParallax(options = {}) {
         // Rebuild after breakpoint change — rewrap new DOM elements
         context.on('resize', () => {
           if (!ctx) return
+          // Rebuilds cancel the core transition without transition:end.
+          transitioning = false
+          if (settleRafId) { cancelFrame(settleRafId); settleRafId = 0 }
           wrapSlides()
-          update()
+          stopLoop()
         }),
       )
 
@@ -174,16 +186,17 @@ export function createParallax(options = {}) {
       // We hook into pointer events on the viewport to drive the rAF loop during drag.
       const viewport = context.getViewport()
       if (viewport) {
+        const eventWindow = ownerWindow ?? window
         const onPointerDown = () => { transitioning = false; startLoop() }
         const onPointerUp = () => settleWhenIdle()
         viewport.addEventListener('pointerdown', onPointerDown)
-        window.addEventListener('pointerup', onPointerUp)
-        window.addEventListener('pointercancel', onPointerUp)
+        eventWindow.addEventListener('pointerup', onPointerUp)
+        eventWindow.addEventListener('pointercancel', onPointerUp)
 
         unsubs.push(() => {
           viewport.removeEventListener('pointerdown', onPointerDown)
-          window.removeEventListener('pointerup', onPointerUp)
-          window.removeEventListener('pointercancel', onPointerUp)
+          eventWindow.removeEventListener('pointerup', onPointerUp)
+          eventWindow.removeEventListener('pointercancel', onPointerUp)
         })
       }
     },
@@ -191,12 +204,13 @@ export function createParallax(options = {}) {
     destroy() {
       running = false
       transitioning = false
-      if (settleRafId) { cancelAnimationFrame(settleRafId); settleRafId = 0 }
-      if (rafId) { cancelAnimationFrame(rafId); rafId = 0 }
+      if (settleRafId) { cancelFrame(settleRafId); settleRafId = 0 }
+      if (rafId) { cancelFrame(rafId); rafId = 0 }
       unsubs.forEach(fn => fn())
       unsubs = []
       unwrapSlides()
       ctx = null
+      ownerWindow = null
     },
   }
 }

@@ -31,35 +31,48 @@ export function createLazyLoad(options = {}) {
    * @param {number} idx
    */
   function loadSlide(el, idx) {
-    if (!ctx || el !== ctx.getSlideElement(idx)) return
+    const context = ctx
+    if (!context || el !== context.getSlideElement(idx)) return
     if (el.dataset.loaded === 'true' || el.dataset.loaded === 'error') return
-    if (!ctx.getSlide(idx)) return
+    if (!context.getSlide(idx)) return
 
     // The core renderer owns content insertion, validation and error events.
     // Plugins must not reimplement markup rendering independently.
-    if (!ctx.renderSlide(idx)) {
-      el.dataset.loaded = 'error'
+    const rendered = context.renderSlide(idx)
+    // Rendering can invoke application callbacks that rebuild or destroy
+    // the carousel. Do not publish a result for a stale slide element.
+    if (ctx !== context || el !== context.getSlideElement(idx)) return
+    if (!rendered) {
+      // false also means that a nested rebuild cancelled this operation.
+      // Only the renderer's explicit error state is a failed lazy render.
+      if (el.dataset.rendered === 'error') el.dataset.loaded = 'error'
       return
     }
 
     el.dataset.loaded = 'true'
     el.classList.add('carousel__slide--loaded')
-    ctx.emit('slide:lazyload', { index: idx, element: el })
+    context.emit('slide:lazyload', { index: idx, element: el })
   }
 
   function preloadAdjacent() {
-    if (!ctx) return
-    const idx = ctx.getIndex()
-    const count = ctx.getSlideCount()
+    const context = ctx
+    if (!context) return
+    const idx = context.getIndex()
+    const count = context.getSlideCount()
     if (count === 0) return
 
-    for (let d = -preloadCount; d <= preloadCount; d++) {
-      let i = idx + d
-      if (ctx.isLoop()) i = ((i % count) + count) % count
-      else if (i < 0 || i >= count) continue
+    // A radius covering the whole carousel still needs only one pass.
+    // Clamp before iterating, including for integers above Number.MAX_SAFE_INTEGER.
+    const loop = context.isLoop()
+    const radius = Math.min(preloadCount, count - 1)
+    const first = loop ? idx - radius : Math.max(0, idx - radius)
+    const last = Math.min(idx + radius, loop ? first + count - 1 : count - 1)
+    for (let position = first; position <= last; position++) {
+      if (ctx !== context) return
+      const i = loop ? ((position % count) + count) % count : position
 
-      const el = ctx.getSlideElement(i)
-      if (el && ctx.getSlide(i)?.lazy) loadSlide(el, i)
+      const el = context.getSlideElement(i)
+      if (el && context.getSlide(i)?.lazy) loadSlide(el, i)
     }
   }
 
@@ -85,8 +98,9 @@ export function createLazyLoad(options = {}) {
       ctx = context
       const viewport = context.getViewport()
       if (!viewport) return
+      const Observer = viewport.ownerDocument?.defaultView?.IntersectionObserver ?? globalThis.IntersectionObserver
 
-      observer = new IntersectionObserver(
+      observer = new Observer(
         (entries) => {
           for (const entry of entries) {
             if (!entry.isIntersecting) continue

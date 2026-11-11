@@ -1,3 +1,5 @@
+import { getLastSlideIndex } from '../navigation.js'
+
 /**
  * Autoplay plugin — auto-advance synchronized with animation.
  * Uses setTimeout chained after transition:end (not setInterval).
@@ -19,6 +21,7 @@ export function createAutoplay(options = {}) {
   let pointerHeld = false
   let onPointerDown = null
   let onPointerEnd = null
+  let eventWindow = null
 
   const interval = options.interval ?? 3000
   const pauseOnHover = options.pauseOnHover ?? true
@@ -42,7 +45,7 @@ export function createAutoplay(options = {}) {
       timer = null
       if (!active || paused || pointerHeld) return
       const count = ctx?.getSlideCount() ?? 0
-      const maxIndex = Math.max(0, Math.ceil(count - (ctx?.getSlidesPerView() ?? 1)))
+      const maxIndex = getLastSlideIndex(count, ctx?.getSlidesPerView() ?? 1)
       if (count <= 1 || (!ctx?.isLoop() && (ctx?.getIndex() ?? 0) >= maxIndex)) {
         active = false
         timer = null
@@ -82,6 +85,7 @@ export function createAutoplay(options = {}) {
       // until the user releases/cancels their pointer.
       const viewport = context.getViewport?.()
       if (viewport) {
+        eventWindow = viewport.ownerDocument?.defaultView ?? window
         onPointerDown = () => {
           if (pauseOnInteraction) {
             this.stop()
@@ -97,8 +101,8 @@ export function createAutoplay(options = {}) {
           if (active && !paused) scheduleNext()
         }
         viewport.addEventListener('pointerdown', onPointerDown)
-        window.addEventListener('pointerup', onPointerEnd)
-        window.addEventListener('pointercancel', onPointerEnd)
+        eventWindow.addEventListener('pointerup', onPointerEnd)
+        eventWindow.addEventListener('pointercancel', onPointerEnd)
       }
 
       unsubs.push(
@@ -130,9 +134,10 @@ export function createAutoplay(options = {}) {
       const viewport = ctx?.getViewport?.()
       if (viewport && onPointerDown) viewport.removeEventListener('pointerdown', onPointerDown)
       if (onPointerEnd) {
-        window.removeEventListener('pointerup', onPointerEnd)
-        window.removeEventListener('pointercancel', onPointerEnd)
+        eventWindow?.removeEventListener('pointerup', onPointerEnd)
+        eventWindow?.removeEventListener('pointercancel', onPointerEnd)
       }
+      eventWindow = null
       pointerHeld = false
       onPointerDown = null
       onPointerEnd = null

@@ -147,3 +147,63 @@ test('lazy rendering reports cancellation when its factory removes the slide', a
   })
   expect(result).toEqual({ rendered: false, count: 1, text: 'Retained' })
 })
+
+for (const phase of ['disconnect', 'connect', 'lazy-connect']) {
+  for (const action of ['destroy', 'update']) {
+    test(`visual copy ${phase} callbacks can ${action} without resuming obsolete work`, async ({ page }) => {
+      const errors = []
+      page.on('pageerror', error => errors.push(error.message))
+      const result = await page.evaluate(async ({ phase, action }) => {
+        const { Carousel } = await import('/src/index.js')
+        const host = document.createElement('div')
+        host.style.width = '400px'
+        document.body.append(host)
+        let carousel
+        let context
+        let armed = false
+        let callbacks = 0
+        const react = element => {
+          if (!armed || !element.closest('[data-carousel-copy]')) return
+          armed = false
+          callbacks++
+          if (action === 'destroy') carousel.destroy()
+          else carousel.update({ slidesPerView: 3, gap: 8 })
+        }
+        customElements.define('carousel-reentry-probe', class extends HTMLElement {
+          connectedCallback() { if (phase !== 'disconnect') react(this) }
+          disconnectedCallback() { if (phase === 'disconnect') react(this) }
+        })
+        carousel = new Carousel(host, [{
+          lazy: phase === 'lazy-connect',
+          content: () => document.createElement('carousel-reentry-probe'),
+        }], {
+          loop: true, slidesPerView: 2, transitionDuration: 0,
+          plugins: [{ name: 'copy-probe', install(ctx) { context = ctx } }],
+        })
+        armed = true
+        let error = null
+        let rendered = null
+        try {
+          if (phase === 'lazy-connect') rendered = context.renderSlide(0)
+          else carousel.update({ gap: 4 })
+        } catch (failure) { error = failure.message }
+        const snapshot = {
+          callbacks, error, rendered,
+          children: host.childElementCount,
+          copies: host.querySelectorAll('[data-carousel-copy]').length,
+          widths: [...host.querySelectorAll('.carousel__slide')].map(slide => slide.style.width),
+        }
+        carousel.destroy()
+        host.remove()
+        return snapshot
+      }, { phase, action })
+      expect(result.callbacks).toBe(1)
+      expect(result.error).toBeNull()
+      expect(result.rendered).toBe(phase === 'lazy-connect' ? false : null)
+      expect(result.children).toBe(action === 'destroy' ? 0 : 1)
+      expect(result.copies).toBe(action === 'destroy' ? 0 : 3)
+      expect(result.widths).toEqual(action === 'destroy' ? [] : ['128px', '128px', '128px', '128px'])
+      expect(errors).toEqual([])
+    })
+  }
+}

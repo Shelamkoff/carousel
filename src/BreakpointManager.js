@@ -6,6 +6,9 @@ export class BreakpointManager {
   /** @type {import('./types').CarouselOptions} */
   #baseOptions
 
+  /** @type {Window | null} */
+  #view
+
   /** @type {[number, Partial<import('./types').CarouselOptions>][]} — sorted ascending */
   #breakpoints
 
@@ -18,8 +21,10 @@ export class BreakpointManager {
   /**
    * @param {import('./types').CarouselOptions} baseOptions
    * @param {Record<number, Partial<import('./types').CarouselOptions>>} [breakpoints]
+   * @param {Window} [view] Window that owns the carousel container.
    */
-  constructor(baseOptions, breakpoints) {
+  constructor(baseOptions, breakpoints, view = window) {
+    this.#view = view
     this.#baseOptions = { ...baseOptions }
 
     this.#breakpoints = breakpoints
@@ -34,7 +39,7 @@ export class BreakpointManager {
 
   #setupQueries() {
     for (const [minWidth] of this.#breakpoints) {
-      const mql = window.matchMedia(`(min-width: ${minWidth}px)`)
+      const mql = this.#view.matchMedia(`(min-width: ${minWidth}px)`)
       const handler = () => this.#onChange?.()
       mql.addEventListener('change', handler)
       this.#queries.push({ mql, handler })
@@ -102,5 +107,6 @@ export class BreakpointManager {
     this.#onChange = null
     this.#baseOptions = {}
     this.#breakpoints = []
+    this.#view = null
   }
 }

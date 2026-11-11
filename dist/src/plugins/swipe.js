@@ -1,3 +1,5 @@
+import { getLastSlideIndex } from '../navigation.js'
+
 /**
  * Swipe plugin — position-first drag.
  *
@@ -36,6 +38,7 @@ export function createSwipe(options = {}) {
   let previousTouchAction = ''
   let dragging = false
   let trackMoved = false
+  let suppressClick = false
   let directionDecided = false
   let cachedLoop = false
   let cachedStep = 0
@@ -53,6 +56,8 @@ export function createSwipe(options = {}) {
   let onCancel = null
   /** @type {((e: DragEvent) => void) | null} */
   let onDragStart = null
+  /** @type {((e: MouseEvent) => void) | null} */
+  let onClick = null
   let resizeUnsub = null
   /** @type {AbortController | null} */
   let abortController = null
@@ -75,18 +80,21 @@ export function createSwipe(options = {}) {
       ctx = context
       viewport = context.getViewport()
       if (!viewport) return
+      const eventWindow = viewport.ownerDocument?.defaultView ?? window
 
       onDown = /** @param {PointerEvent} e */ (e) => {
+        suppressClick = false
         if (!enableMouse && e.pointerType === 'mouse') return
         if (e.button !== 0) return
         if (dragging || (e.pointerType === 'touch' && !e.isPrimary)) return
         if (/** @type {HTMLElement} */ (e.target).closest('.carousel__arrow, .carousel__dot, .carousel__thumb')) return
+        if (context.getSlideCount() === 0) return
 
-        // Take over: grab current position, stop animation cleanly
+        // Settle a deferred resize before capturing gesture coordinates.
+        context.stopAnimation()
+        if (!viewport || context.getViewport() !== viewport || context.getSlideCount() === 0) return
         startPosition = context.getPosition()
         startIndex = context.getIndex()
-        // Cancel rAF/timers but DON'T re-render (slides already in correct position from last rAF frame)
-        context.stopAnimation()
 
         dragging = true
         trackMoved = false
@@ -99,7 +107,6 @@ export function createSwipe(options = {}) {
         cachedN = context.getSlideCount()
         cachedPerView = context.getSlidesPerView()
 
-        try { viewport?.setPointerCapture(e.pointerId) } catch { /* detached pointer */ }
       }
 
       onMove = /** @param {PointerEvent} e */ (e) => {
@@ -117,6 +124,9 @@ export function createSwipe(options = {}) {
             context.snapBack(startIndex)
             return
           }
+          // Capturing on pointerdown retargets an ordinary link/button click
+          // to the viewport. Take capture only after a horizontal drag starts.
+          try { viewport?.setPointerCapture(e.pointerId) } catch { /* detached pointer */ }
         }
 
         trackMoved = true
@@ -147,6 +157,7 @@ export function createSwipe(options = {}) {
           context.snapBack(startIndex)
           return
         }
+        suppressClick = true
 
         const dx = e.clientX - startX
 
@@ -163,7 +174,8 @@ export function createSwipe(options = {}) {
 
         if (perScroll > 1) {
           // Exactly one scroll step from the index at pointerdown.
-          targetIdx = startIndex + direction * perScroll
+          const step = cachedLoop ? perScroll % cachedN : perScroll
+          targetIdx = startIndex + direction * step
         } else {
           targetIdx = engine ? engine.toIndex(pos) : Math.round(pos / cachedStep)
           if (targetIdx === startIndex) targetIdx += direction
@@ -172,7 +184,7 @@ export function createSwipe(options = {}) {
         if (cachedLoop) {
           targetIdx = ((targetIdx % cachedN) + cachedN) % cachedN
         } else {
-          const maxIdx = Math.max(0, Math.ceil(cachedN - cachedPerView))
+          const maxIdx = getLastSlideIndex(cachedN, cachedPerView)
           targetIdx = Math.max(0, Math.min(targetIdx, maxIdx))
         }
 
@@ -191,19 +203,27 @@ export function createSwipe(options = {}) {
       }
 
       // AbortController: all listeners cleaned up on signal abort (destroy or DOM removal)
-      abortController = new AbortController()
+      const Controller = eventWindow.AbortController ?? AbortController
+      abortController = new Controller()
       const signal = abortController.signal
 
       // pointerdown on viewport, move/up on WINDOW (captures fast drags outside viewport)
       viewport.addEventListener('pointerdown', onDown, { signal })
-      window.addEventListener('pointermove', onMove, { signal })
-      window.addEventListener('pointerup', onUp, { signal })
-      window.addEventListener('pointercancel', onCancel, { signal })
+      eventWindow.addEventListener('pointermove', onMove, { signal })
+      eventWindow.addEventListener('pointerup', onUp, { signal })
+      eventWindow.addEventListener('pointercancel', onCancel, { signal })
 
       previousTouchAction = viewport.style.touchAction
       viewport.style.touchAction = 'pan-y pinch-zoom'
       onDragStart = e => e.preventDefault()
       viewport.addEventListener('dragstart', onDragStart, { signal })
+      onClick = e => {
+        if (!suppressClick || e.detail === 0) return
+        suppressClick = false
+        e.preventDefault()
+        e.stopPropagation()
+      }
+      viewport.addEventListener('click', onClick, { capture: true, signal })
 
       resizeUnsub = context.on('resize', cancelDrag)
     },
@@ -223,6 +243,8 @@ export function createSwipe(options = {}) {
       onUp = null
       onCancel = null
       onDragStart = null
+      onClick = null
+      suppressClick = false
       ctx = null
     },
   }

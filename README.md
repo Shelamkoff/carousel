@@ -213,7 +213,9 @@ If `install()` throws, the carousel rolls back context subscriptions and invokes
 
 ## Verification
 
-Run `npm run check` to execute the Node regression suite, check the public TypeScript API, and build the publishable ESM package. Run `npx playwright install chromium` once, then `npm run test:browser` for Chromium integration tests of the live demo and lifecycle page. GitHub Actions runs both suites on pushes and pull requests. The diagnostic page is also available at `/tests/browser/lifecycle.html` with `npm run demo`.
+Run `npm ci` for the locked development dependencies, then `npm run check` to execute the Node regression suite, check the public TypeScript API, and rebuild the ESM package and local demo dependency. GitHub Actions checks Node 20.19, 22 and 24, and rejects an out-of-date committed distribution. The committed `dist` also supports Git installs with lifecycle scripts disabled.
+
+Run `npx playwright install chromium` once, then `npm run test:browser` for Chromium integration tests of navigation, forms, same-origin iframes, live examples and lifecycle cleanup. To use an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable. The diagnostic page is available at `/tests/browser/lifecycle.html` with `npm run demo`.
 
 ## Security boundary
 
@@ -221,7 +223,7 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, and fixed scroll steps.
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, fixed scroll steps, auto-height media, dynamic collections and lazy rendering. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
 
 To run the same demo locally:
 

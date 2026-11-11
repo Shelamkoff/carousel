@@ -651,3 +651,202 @@ test('destroying during plugin install always rolls back the pending plugin', ()
 })
 
 test.after(() => { globalThis.performance = originalPerformance })
+
+test('fractional finite pages expose a stable final index and no further navigation', () => {
+  const { carousel } = mount(280, 5, { slidesPerView: 2.8, transitionDuration: 0 })
+  const changes = []
+  carousel.on('slide:change', event => changes.push(event))
+  carousel.goTo(3)
+  assert.equal(carousel.getIndex(), 3)
+  assert.equal(carousel.getSlide().content, '3')
+  carousel.next()
+  carousel.next()
+  assert.equal(changes.length, 1)
+  carousel.destroy()
+})
+
+test('repeating an animated destination preserves alignment and completion events', () => {
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(100, 5, { transitionDuration: 500, plugins: [probe] })
+  const changes = []
+  carousel.on('slide:change', event => changes.push(event))
+  carousel.goTo(1)
+  frame(170)
+  assert.equal(carousel.getIndex(), 1)
+  carousel.goTo(1)
+  frame(600)
+  assert.equal(probe.ctx.getPosition(), 100)
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].prevIndex, 0)
+  assert.equal(changes[0].index, 1)
+  carousel.destroy()
+})
+
+test('cancelling a finite transition back to its origin settles without a false slide change', () => {
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(100, 5, { transitionDuration: 500, plugins: [probe] })
+  const changes = []
+  carousel.on('slide:change', event => changes.push(event))
+  carousel.goTo(1)
+  frame(50)
+  assert.equal(carousel.getIndex(), 0)
+  carousel.prev()
+  frame(600)
+  assert.equal(probe.ctx.getPosition(), 0)
+  assert.deepEqual(changes, [])
+  carousel.destroy()
+})
+
+test('retargeting a finite transition to its visible index notifies the settled destination', () => {
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(100, 5, { transitionDuration: 500, plugins: [probe] })
+  const changes = []
+  carousel.on('slide:change', event => changes.push(event))
+  carousel.goTo(3)
+  frame(70)
+  assert.equal(carousel.getIndex(), 1)
+  carousel.goTo(1)
+  frame(600)
+  assert.equal(probe.ctx.getPosition(), 100)
+  assert.equal(changes.length, 1)
+  assert.equal(changes[0].prevIndex, 0)
+  assert.equal(changes[0].index, 1)
+  carousel.destroy()
+})
+
+test('consecutive observed resizes during navigation retain the initial coordinate system', () => {
+  const { host, carousel } = mount(100, 6, { transitionDuration: 600 })
+  carousel.goTo(3)
+  host.width = 400
+  ResizeObserver.flush()
+  frame(20)
+  host.width = 800
+  ResizeObserver.flush()
+  frame(20)
+  frame(700)
+  assert.equal(carousel.getIndex(), 3)
+  carousel.destroy()
+})
+
+test('large loop scroll steps retain their modular destination before addition', () => {
+  const { carousel } = mount(100, 5, {
+    loop: true, slidesPerScroll: Number.MAX_SAFE_INTEGER, transitionDuration: 0,
+  })
+  try {
+    carousel.goTo(2)
+    carousel.next()
+    assert.equal(carousel.getIndex(), 3)
+    carousel.prev()
+    assert.equal(carousel.getIndex(), 2)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('malformed breakpoint overrides are rejected before cloning normalizes them', () => {
+  for (const override of [null, 1, [], 'unexpected']) {
+    const host = new Element()
+    host.width = 200
+    assert.throws(() => new Carousel(host, [{ content: 'one' }], {
+      breakpoints: { 600: override },
+    }), TypeError)
+  }
+  const { carousel } = mount(200, 2)
+  try {
+    assert.throws(() => carousel.update({ breakpoints: { 600: null } }), TypeError)
+    assert.equal(carousel.getIndex(), 0)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('once callbacks remain single-use when a preceding listener emits recursively', () => {
+  const probe = { name: 'event-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(100, 2, { transitionDuration: 0, plugins: [probe] })
+  let nested = false
+  let publicCalls = 0
+  let pluginCalls = 0
+  carousel.on('resize', () => {
+    if (nested) return
+    nested = true
+    probe.ctx.emit('resize', { slidesPerView: 1 })
+  })
+  carousel.once('resize', () => publicCalls++)
+  probe.ctx.once('resize', () => pluginCalls++)
+  try {
+    carousel.update({ gap: 1 })
+    assert.equal(publicCalls, 1)
+    assert.equal(pluginCalls, 1)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('tapping a settled fractional last page does not lock subsequent page navigation', () => {
+  const { carousel, viewport } = mount(280, 5, {
+    slidesPerView: 2.8, slidesPerScroll: 2, transitionDuration: 500,
+    plugins: [createSwipe()],
+  })
+  try {
+    carousel.goTo(3)
+    frame(600)
+    assert.equal(carousel.getIndex(), 3)
+    pointer(viewport, 'pointerup', 0)
+    carousel.prev()
+    frame(600)
+    assert.equal(carousel.getIndex(), 1)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('touch interruption consumes pending resize before starting gesture coordinates', () => {
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel, viewport, host } = mount(100, 6, {
+    transitionDuration: 600, plugins: [createSwipe(), probe],
+  })
+  const changes = []
+  carousel.on('slide:change', event => changes.push(event))
+  try {
+    carousel.goTo(3)
+    host.width = 400
+    ResizeObserver.flush()
+    frame(80)
+    const indexAtInterruption = carousel.getIndex()
+    assert.equal(indexAtInterruption, 1)
+    pointer(viewport, 'pointerup', 0)
+    frame(700)
+    assert.equal(carousel.getIndex(), indexAtInterruption)
+    assert.equal(probe.ctx.getPosition(), indexAtInterruption * probe.ctx.getStep())
+    assert.deepEqual(changes, [])
+    pointer(viewport, 'pointerup', -60)
+    frame(700)
+    assert.equal(carousel.getIndex(), indexAtInterruption + 1)
+    assert.equal(changes.length, 1)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('a qualifying swipe after pending resize uses the rescaled gesture origin', () => {
+  const { carousel, viewport, host } = mount(100, 6, {
+    transitionDuration: 600, plugins: [createSwipe()],
+  })
+  const changes = []
+  carousel.on('slide:change', event => changes.push(event))
+  try {
+    carousel.goTo(3)
+    host.width = 400
+    ResizeObserver.flush()
+    frame(80)
+    assert.equal(carousel.getIndex(), 1)
+    pointer(viewport, 'pointerup', -60)
+    frame(700)
+    assert.equal(carousel.getIndex(), 2)
+    assert.equal(changes.length, 1)
+    assert.equal(changes[0].prevIndex, 1)
+    assert.equal(changes[0].index, 2)
+  } finally {
+    carousel.destroy()
+  }
+})

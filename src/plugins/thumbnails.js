@@ -26,6 +26,8 @@ export function createThumbnails(options = {}) {
 
   function buildThumbs() {
     if (!container || !ctx) return
+    const owner = ctx
+    const document = container.ownerDocument ?? globalThis.document
     container.innerHTML = ''
     thumbEls = []
 
@@ -47,7 +49,9 @@ export function createThumbnails(options = {}) {
         thumb.appendChild(img)
       }
 
-      thumb.addEventListener('click', () => ctx.goTo(i))
+      thumb.addEventListener('click', () => {
+        if (ctx === owner && thumbEls[i] === thumb) owner.goTo(i)
+      })
       thumbEls.push(thumb)
       container.appendChild(thumb)
     }
@@ -71,6 +75,7 @@ export function createThumbnails(options = {}) {
       ctx = context
       const root = context.getRoot()
       if (!root) return
+      const document = root.ownerDocument ?? globalThis.document
 
       container = document.createElement('div')
       container.className = `carousel__thumbnails carousel__thumbnails--${position}`

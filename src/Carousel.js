@@ -3,6 +3,8 @@ import { SlideManager } from './SlideManager.js'
 import { TrackRenderer } from './TrackRenderer.js'
 import { LoopEngine } from './LoopEngine.js'
 import { BreakpointManager } from './BreakpointManager.js'
+import { isHTMLElement } from './dom.js'
+import { getLastSlideIndex } from './navigation.js'
 
 const ownedPluginInstances = new WeakSet()
 
@@ -78,8 +80,7 @@ function validateOptionsTree(options) {
 function validateSlide(slide) {
   if (!slide || typeof slide !== 'object') throw new TypeError('Carousel: each slide must be an object')
   const content = slide.content
-  const isElement = typeof HTMLElement !== 'undefined' && content instanceof HTMLElement
-  if (typeof content !== 'string' && typeof content !== 'function' && !isElement) {
+  if (typeof content !== 'string' && typeof content !== 'function' && !isHTMLElement(content)) {
     throw new TypeError('Carousel: slide content must be a string, HTMLElement, or render function')
   }
   if (slide.thumb !== undefined && typeof slide.thumb !== 'string') {
@@ -145,13 +146,14 @@ export class Carousel {
     this.#container = typeof container === 'string'
       ? document.querySelector(container) : container
     if (!this.#container) throw new Error('Carousel: container not found')
-    if (!(this.#container instanceof HTMLElement)) throw new TypeError('Carousel: container must be an HTMLElement')
+    if (!isHTMLElement(this.#container)) throw new TypeError('Carousel: container must be an HTMLElement')
     if (!Array.isArray(slides)) throw new TypeError('Carousel: slides must be an array')
     slides.forEach(validateSlide)
     if (options.plugins !== undefined && !Array.isArray(options.plugins)) {
       throw new TypeError('Carousel: plugins must be an array')
     }
 
+    validateOptionsTree({ ...DEFAULTS, ...options })
     this.#options = {
       ...DEFAULTS,
       ...options,
@@ -160,10 +162,9 @@ export class Carousel {
         : undefined,
       plugins: options.plugins ? [...options.plugins] : undefined,
     }
-    validateOptionsTree(this.#options)
     this.#slideManager = new SlideManager(slides)
     this.#trackRenderer = new TrackRenderer()
-    this.#breakpointManager = new BreakpointManager(this.#options, this.#options.breakpoints)
+    this.#breakpointManager = new BreakpointManager(this.#options, this.#options.breakpoints, this.#container.ownerDocument?.defaultView ?? window)
 
     try {
       this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
@@ -201,7 +202,7 @@ export class Carousel {
       ? 0
       : this.#loop
         ? startIndex % count
-        : Math.min(startIndex, Math.max(0, Math.ceil(count - (opts.slidesPerView ?? 1))))
+        : Math.min(startIndex, this.#maxIndex())
     this.#position = this.#selectedIndex * this.#step()
     this.#render()
 
@@ -209,7 +210,7 @@ export class Carousel {
       const previousStep = previousSlideWidth + this.#trackRenderer.gap
       if (this.#animating) {
         this.#pendingResize = true
-        this.#pendingResizeStep = previousStep
+        this.#pendingResizeStep ??= previousStep
         return
       }
       this.#applyResize(previousStep)
@@ -221,13 +222,13 @@ export class Carousel {
       ? this.#selectedIndex
       : this.#loop
         ? this.#loop.toIndex(this.#position)
-        : Math.max(0, Math.round(this.#position / previousStep))
+        : this.#finiteIndex(previousStep)
+    this.#pendingResize = false
+    this.#pendingResizeStep = null
     this.#initLoop()
     this.#position = idx * this.#step()
     this.#render()
     this.#selectedIndex = this.getIndex()
-    this.#pendingResize = false
-    this.#pendingResizeStep = null
     this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
   }
 
@@ -239,7 +240,8 @@ export class Carousel {
 
   /** Respect reduced-motion preferences without changing configured durations. */
   #duration() {
-    return window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    const view = this.#container?.ownerDocument?.defaultView ?? window
+    return view.matchMedia?.('(prefers-reduced-motion: reduce)').matches
       ? 0
       : this.#resolvedOptions.transitionDuration ?? 400
   }
@@ -282,10 +284,11 @@ export class Carousel {
   }
 
   #handleBreakpointChange() {
+    const oldIdx = this.getIndex()
     this.#stopAllAnimations()
     this.#pendingResize = false
     this.#pendingResizeStep = null
-    const oldIdx = this.getIndex()
+    const epoch = this.#navigationEpoch
     this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
     const opts = this.#resolvedOptions
     this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
@@ -294,6 +297,7 @@ export class Carousel {
       loop: opts.loop ?? false,
       ariaLabel: opts.ariaLabel,
     })
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
     this.#initLoop()
     this.#position = oldIdx * this.#step()
     this.#selectedIndex = oldIdx
@@ -407,7 +411,15 @@ export class Carousel {
     }
     const context = Object.freeze({
       on: (ev, fn) => trackSubscription(this.#events.on(ev, fn)),
-      once: (ev, fn) => trackSubscription(this.#events.once(ev, fn)),
+      once: (ev, fn) => {
+        if (typeof fn !== 'function') throw new TypeError('Carousel: event handler must be a function')
+        const unsubscribe = trackSubscription(this.once(ev, (...args) => {
+          // Do not retain completed once handlers in a long-lived plugin.
+          unsubscribe()
+          return fn(...args)
+        }))
+        return unsubscribe
+      },
       emit: (ev, ...args) => this.#events.emit(ev, ...args),
 
       next: () => this.next(),
@@ -420,13 +432,20 @@ export class Carousel {
         const logical = index ?? this.getIndex()
         const targetPos = this.#loop
           ? this.#position + this.#loop.shortestDelta(this.#position, logical)
-          : logical * this.#step()
+          : Math.max(0, Math.min(logical, this.#maxIndex(),
+              this.#slideManager.getSlideCount() - (this.#resolvedOptions.slidesPerView ?? 1),
+            )) * this.#step()
         this.#animateSnapBack(targetPos, this.#duration())
       },
 
-      // Cancel animation without re-rendering (slides stay where rAF left them)
+      // Keep the rendered position unless a deferred layout has changed
+      // its coordinate system. Gesture callers read their origin afterward.
       stopAnimation: () => {
+        if (this.#destroyed) return
         this.#stopAllAnimations()
+        if (this.#pendingResize) {
+          this.#applyResize(this.#pendingResizeStep ?? this.#step())
+        }
       },
 
       getPosition: () => this.#position,
@@ -488,8 +507,14 @@ export class Carousel {
 
   /* ═══════════════ Navigation ═══════════════ */
 
-  next() { this.#navigate(this.getIndex() + this.#perScroll(), 1) }
-  prev() { this.#navigate(this.getIndex() - this.#perScroll(), -1) }
+  #navigationStep() {
+    const step = this.#perScroll()
+    const count = this.#slideManager.getSlideCount()
+    return this.#loop && count > 0 ? step % count : step
+  }
+
+  next() { this.#navigate(this.getIndex() + this.#navigationStep(), 1) }
+  prev() { this.#navigate(this.getIndex() - this.#navigationStep(), -1) }
 
   /** @param {number} index */
   goTo(index) { this.#navigate(index) }
@@ -516,30 +541,34 @@ export class Carousel {
       return
     }
 
-    if (this.#animating) {
-      if (this.#loop || this.#perScroll() > 1) return
-      this.#stopAllAnimations()
-    }
     const count = this.#slideManager.getSlideCount()
     if (count === 0) return
     const loop = this.#loop !== null
-    const previous = fromIndex ?? this.getIndex()
+    index = loop
+      ? ((index % count) + count) % count
+      : Math.max(0, Math.min(index, this.#maxIndex()))
 
-    if (loop) {
-      index = ((index % count) + count) % count
-    } else {
-      const maxIndex = Math.max(0, Math.ceil(count - (this.#resolvedOptions.slidesPerView ?? 1)))
-      index = Math.max(0, Math.min(index, maxIndex))
+    let previous = fromIndex ?? this.getIndex()
+    if (this.#animating) {
+      if (loop || this.#perScroll() > 1) return
+      // Repeating the in-flight destination must keep its completion events
+      // and animation clock alive, even once getIndex() rounds to that slide.
+      if (fromIndex === undefined && index === this.#selectedIndex) return
+      previous = fromIndex ?? this.#prevIndex
+      this.#stopAllAnimations()
+      if (this.#pendingResize) {
+        const epoch = this.#navigationEpoch
+        this.#applyResize(this.#pendingResizeStep ?? this.#step())
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+      }
     }
 
     if (index === previous) {
-      if (fromIndex !== undefined) {
-        const delta = loop
-          ? this.#loop.shortestDelta(this.#position, index)
-          : index * this.#step() - this.#position
-        if (Math.abs(delta) > 0.01) {
-          this.#animateSnapBack(this.#position + delta, this.#duration())
-        }
+      const targetPos = loop
+        ? this.#position + this.#loop.shortestDelta(this.#position, index)
+        : Math.min(index, Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1))) * this.#step()
+      if (Math.abs(targetPos - this.#position) > 0.01) {
+        this.#animateSnapBack(targetPos, this.#duration())
       }
       return
     }
@@ -696,6 +725,10 @@ export class Carousel {
    * @param {number} duration
    */
   #animateSnapBack(targetPos, duration) {
+    this.#selectedIndex = this.#loop
+      ? this.#loop.toIndex(targetPos)
+      : this.#finiteIndex(this.#step(), targetPos)
+    this.#prevIndex = this.#selectedIndex
     this.#runPositionAnimation(targetPos, duration, () => {
       this.#animating = false
       if (this.#pendingResize) {
@@ -749,12 +782,26 @@ export class Carousel {
 
   /* ═══════════════ Public API ═══════════════ */
 
+  #maxIndex() {
+    return getLastSlideIndex(this.#slideManager.getSlideCount(), this.#resolvedOptions.slidesPerView ?? 1)
+  }
+
+  #finiteIndex(step, position = this.#position) {
+    const maxIndex = this.#maxIndex()
+    const lastPosition = Math.min(maxIndex, Math.max(0,
+      this.#slideManager.getSlideCount() - (this.#resolvedOptions.slidesPerView ?? 1),
+    )) * step
+    // The last page can be a partial step. Rounding its coordinate alone
+    // would report the preceding slide and keep next()/autoplay enabled.
+    if (position >= lastPosition - Math.min(0.001, step * 1e-6)) return maxIndex
+    return Math.max(0, Math.min(maxIndex, Math.round(position / step)))
+  }
+
   getIndex() {
-    const step = this.#step()
+    const step = this.#pendingResizeStep ?? this.#step()
     if (step <= 0) return this.#selectedIndex
     if (this.#loop) return this.#loop.toIndex(this.#position)
-    const maxIndex = Math.max(0, Math.ceil(this.#slideManager.getSlideCount() - (this.#resolvedOptions.slidesPerView ?? 1)))
-    return step > 0 ? Math.max(0, Math.min(maxIndex, Math.round(this.#position / step))) : 0
+    return this.#finiteIndex(step)
   }
 
   getRealIndex() { return this.getIndex() }
@@ -789,12 +836,14 @@ export class Carousel {
     this.#pendingResize = false
     this.#pendingResizeStep = null
     const opts = this.#resolvedOptions
+    const epoch = this.#navigationEpoch
     this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
       slidesPerView: opts.slidesPerView ?? 1,
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
       ariaLabel: opts.ariaLabel,
     }, refreshContent)
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
     this.#initLoop()
     const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
     this.#position = Math.max(0, idx) * this.#step()
@@ -821,16 +870,13 @@ export class Carousel {
     }
     const currentIndex = this.getIndex()
     const previousOptions = this.#options
-    const nextOptions = {
-      ...previousOptions,
-      ...options,
-      breakpoints: Object.prototype.hasOwnProperty.call(options, 'breakpoints')
-        ? options.breakpoints
-          ? Object.fromEntries(Object.entries(options.breakpoints).map(([width, override]) => [width, { ...override }]))
-          : undefined
-        : previousOptions.breakpoints,
-    }
+    const nextOptions = { ...previousOptions, ...options }
     validateOptionsTree(nextOptions)
+    if (nextOptions.breakpoints) {
+      nextOptions.breakpoints = Object.fromEntries(
+        Object.entries(nextOptions.breakpoints).map(([width, override]) => [width, { ...override }]),
+      )
+    }
     this.#breakpointManager.updateBase(nextOptions)
     try {
       this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
@@ -851,7 +897,19 @@ export class Carousel {
   off(ev, fn) { this.#events.off(ev, fn) }
   once(ev, fn) {
     if (this.#destroyed) throw new Error('Carousel is destroyed')
-    return this.#events.once(ev, fn)
+    if (typeof fn !== 'function') throw new TypeError('Carousel: event handler must be a function')
+    let pending = true
+    const unsubscribe = this.#events.once(ev, (...args) => {
+      // An EventBus emission can already have snapshotted this wrapper when
+      // a nested emission consumes it. Guard that stale snapshot explicitly.
+      if (!pending) return
+      pending = false
+      return fn(...args)
+    })
+    return () => {
+      pending = false
+      unsubscribe()
+    }
   }
 
   /* ═══════════════ Lifecycle ═══════════════ */

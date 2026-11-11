@@ -55,7 +55,7 @@ export class LoopEngine {
     const normalized = this.normalize(currentPosition)
     let delta = target - normalized
     if (delta > this.#loopLength / 2) delta -= this.#loopLength
-    if (delta < -this.#loopLength / 2) delta += this.#loopLength
+    if (delta <= -this.#loopLength / 2) delta += this.#loopLength
     return delta
   }
 

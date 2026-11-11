@@ -1,3 +1,5 @@
+import { getLastSlideIndex } from '../navigation.js'
+
 const ARROW_SVG = {
   prev: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6l6 6"/></svg>',
   next: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6l-6 6"/></svg>',
@@ -44,7 +46,7 @@ export function createArrows(options = {}) {
 
     const index = ctx.getIndex()
     const perView = ctx.getSlidesPerView()
-    const maxIndex = Math.max(0, Math.ceil(count - perView))
+    const maxIndex = getLastSlideIndex(count, perView)
     prevBtn.style.display = index <= 0 ? 'none' : ''
     nextBtn.style.display = index >= maxIndex ? 'none' : ''
   }
@@ -56,6 +58,7 @@ export function createArrows(options = {}) {
       ctx = context
       const viewport = context.getViewport()
       if (!viewport) return
+      const document = viewport.ownerDocument ?? globalThis.document
 
       prevBtn = document.createElement('button')
       prevBtn.className = 'carousel__arrow carousel__arrow--prev'
