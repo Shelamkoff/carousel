@@ -91,3 +91,59 @@ test('destroying the carousel from a render function retires the active rebuild'
   })
   expect(result).toEqual({ error: null, children: 0 })
 })
+
+test('a reentrant update keeps the newest layout and retires the outer rebuild', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { Carousel } = await import('/src/index.js')
+    const host = document.createElement('div')
+    host.style.width = '400px'
+    document.body.append(host)
+    let carousel
+    let calls = 0
+    let context
+    const slides = [{ content: () => {
+      if (++calls === 2) carousel.update({ slidesPerView: 2, gap: 8 })
+      return document.createElement('article')
+    } }, { content: '<article>Second</article>' }]
+    carousel = new Carousel(host, slides, {
+      transitionDuration: 0,
+      plugins: [{ name: 'layout-probe', install(ctx) { context = ctx } }],
+    })
+    carousel.update({ gap: 4 })
+    const snapshot = {
+      widths: context.getSlideElements().map(slide => slide.style.width),
+      gap: context.getTrack().style.gap,
+      slidesPerView: context.options.slidesPerView,
+    }
+    carousel.destroy()
+    host.remove()
+    return snapshot
+  })
+  expect(result).toEqual({ widths: ['196px', '196px'], gap: '8px', slidesPerView: 2 })
+})
+
+test('lazy rendering reports cancellation when its factory removes the slide', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { Carousel } = await import('/src/index.js')
+    const host = document.createElement('div')
+    host.style.width = '400px'
+    document.body.append(host)
+    let carousel
+    let context
+    carousel = new Carousel(host, [{ lazy: true, content: () => {
+      carousel.removeSlide(0)
+      const article = document.createElement('article')
+      article.textContent = 'Removed'
+      return article
+    } }, { content: '<article>Retained</article>' }], {
+      loop: true, transitionDuration: 0,
+      plugins: [{ name: 'render-probe', install(ctx) { context = ctx } }],
+    })
+    const rendered = context.renderSlide(0)
+    const snapshot = { rendered, count: carousel.getSlides().length, text: context.getSlideElement(0).textContent }
+    carousel.destroy()
+    host.remove()
+    return snapshot
+  })
+  expect(result).toEqual({ rendered: false, count: 1, text: 'Retained' })
+})

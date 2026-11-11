@@ -38,11 +38,18 @@ jobs:
         run: npm run check
 
       - name: Verify committed distribution
-        run: git diff --exit-code -- dist
+        run: git diff --exit-code -- dist demo-assets
 
-      - name: Install Chromium
+      - name: Configure Chromium
         if: matrix.node == '24'
-        run: npx playwright install --with-deps chromium
+        run: |
+          carousel_chrome=$(command -v google-chrome || command -v chromium || true)
+          if [ -n "$carousel_chrome" ]; then
+            "$carousel_chrome" --version
+            echo "PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=$carousel_chrome" >> "$GITHUB_ENV"
+          else
+            npx playwright install --with-deps chromium
+          fi
 
       - name: Browser integration tests
         if: matrix.node == '24'
