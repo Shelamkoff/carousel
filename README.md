@@ -184,6 +184,8 @@ Set `--carousel-*` properties on the element passed to `new Carousel()`, a theme
 
 Changing a host class, data attribute, or custom property updates the theme immediately; no `carousel.update()` call is needed. Each host can have its own theme. Host styles also survive carousel rebuilds and destroy/remount cycles.
 
+[Try Light, Dark and Compact themes in the live demo](https://shelamkoff.github.io/carousel/#theming-example).
+
 ### Theme properties
 
 All names below have the `--carousel-` prefix.

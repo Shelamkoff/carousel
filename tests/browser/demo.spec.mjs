@@ -77,3 +77,39 @@ test('the live demo previews all three reveal transitions', async ({ page }) => 
   await expect(page.locator('#transition-status')).toHaveText('Curtain · slide 5 of 6')
   expect(errors).toEqual([])
 })
+
+test('the live demo changes themes without remounting or losing the selected slide', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/#theming-example')
+  await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+  const host = page.locator('#demo-theming')
+  const presets = page.getByRole('group', { name: 'Carousel theme presets' })
+  await expect(presets.getByRole('button')).toHaveCount(3)
+  await page.evaluate(() => {
+    window.demoThemingNodes = [...document.querySelectorAll('#demo-theming .carousel, #demo-theming .carousel__slide, #demo-theming .carousel__arrow')]
+  })
+  await host.getByRole('button', { name: 'Next slide', exact: true }).click()
+  await expect(page.locator('#theme-status')).toHaveText('Light · slide 2 of 3')
+  await presets.getByRole('button', { name: 'Dark', exact: true }).click()
+  await expect(host).toHaveAttribute('data-theme', 'dark')
+  await expect(page.locator('#theme-status')).toHaveText('Dark · slide 2 of 3')
+  await expect(host).toHaveCSS('background-color', 'rgb(23, 27, 36)')
+  await expect(host.locator('.carousel__arrow--next')).toHaveCSS('background-color', 'rgb(37, 45, 59)')
+  await presets.getByRole('button', { name: 'Compact', exact: true }).click()
+  await expect(page.locator('#theme-status')).toHaveText('Compact · slide 2 of 3')
+  await expect(host.locator('.carousel__arrow--next')).toHaveCSS('width', '28px')
+  await expect(host.locator('.carousel__thumb').first()).toHaveCSS('width', '44px')
+  const sameNodes = await page.evaluate(() => {
+    const current = [...document.querySelectorAll('#demo-theming .carousel, #demo-theming .carousel__slide, #demo-theming .carousel__arrow')]
+    return current.length === window.demoThemingNodes.length && current.every((node, index) => node === window.demoThemingNodes[index])
+  })
+  expect(sameNodes).toBe(true)
+  await page.setViewportSize({ width: 375, height: 900 })
+  await expect(host.locator('.carousel__thumb').first()).toHaveCSS('width', '44px')
+  expect(await host.evaluate(element => element.getBoundingClientRect().right <= window.innerWidth)).toBe(true)
+  await presets.getByRole('button', { name: 'Light', exact: true }).click()
+  await expect(page.locator('#theme-status')).toHaveText('Light · slide 2 of 3')
+  await expect(host).toHaveCSS('background-color', 'rgb(255, 255, 255)')
+  expect(errors).toEqual([])
+})

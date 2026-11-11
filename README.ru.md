@@ -184,6 +184,8 @@ carousel.update({ transition: 'curtain' })
 
 Изменение класса, data-атрибута или CSS-переменной контейнера сразу обновляет тему; вызывать `carousel.update()` не требуется. У каждой карусели может быть своя тема. Стили контейнера сохраняются при перестроении карусели и после destroy/remount.
 
+[Попробуйте темы Light, Dark и Compact в живом демо](https://shelamkoff.github.io/carousel/#theming-example).
+
 ### Свойства темы
 
 Все имена в таблице имеют префикс `--carousel-`.
@@ -198,7 +200,7 @@ carousel.update({ transition: 'curtain' })
 | `arrow-shadow`, `arrow-shadow-hover` | `0 2px 8px rgba(0, 0, 0, 0.15)` / `0 4px 12px rgba(0, 0, 0, 0.2)`. |
 | `dots-gap`, `dots-padding` | `8px` / `12px 0`. |
 | `dot-size`, `dot-width`, `dot-height` | Размер `10px`; ширина и высота по умолчанию равны размеру. Можно задавать вытянутую форму. |
-| `dot-bg`, `dot-bg-hover`, `dot-bg-active` | Чёрный с прозрачностью `0.2` / `0.4` / `0.7`. |
+| `dot-bg`, `dot-bg-hover`, `dot-bg-active` | Чёрный с непрозрачностью `0.2` / `0.4` / `0.7`. |
 | `dot-radius`, `dot-scale-active` | `50%` / `1.2`. |
 | `thumb-width`, `thumb-height` | Переопределяют числовые параметры плагина `width` / `height` (`60px` / `40px` по умолчанию). Размеры включают рамку. |
 | `thumb-gap`, `thumb-padding` | `6px` / `8px 0`; отступы применяются к нижней ленте. |

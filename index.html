@@ -69,6 +69,65 @@
     .effect-figure { margin: 0; background: #fff; border-radius: 8px; overflow: hidden; }
     .effect-figure img { display: block; width: 100%; height: auto; }
     .effect-figure figcaption { padding: 12px 20px; line-height: 1.5; }
+    .theme-preview {
+      --theme-surface: #fff;
+      --theme-text: #243248;
+      --theme-accent: #295bc3;
+      --theme-muted: #a8b4c7;
+      --theme-edge: #c8d1df;
+      --theme-control: #fff;
+      --theme-control-hover: #e8eef8;
+      --carousel-radius: 8px;
+      --carousel-arrow-size: 36px;
+      --carousel-arrow-icon-size: 20px;
+      --carousel-arrow-bg: var(--theme-control);
+      --carousel-arrow-bg-hover: var(--theme-control-hover);
+      --carousel-arrow-color: var(--theme-text);
+      --carousel-arrow-color-hover: var(--theme-text);
+      --carousel-arrow-border: 1px solid var(--theme-edge);
+      --carousel-arrow-shadow: none;
+      --carousel-arrow-shadow-hover: none;
+      --carousel-dot-bg: var(--theme-muted);
+      --carousel-dot-bg-hover: var(--theme-accent);
+      --carousel-dot-bg-active: var(--theme-accent);
+      --carousel-thumb-width: 72px;
+      --carousel-thumb-height: 48px;
+      --carousel-thumb-border-color-active: var(--theme-accent);
+      --carousel-focus-color: var(--theme-accent);
+      --carousel-transition-color: var(--theme-accent);
+      --carousel-control-duration: 150ms;
+      padding: 16px;
+      border: 1px solid var(--theme-edge);
+      border-radius: 12px;
+      background: var(--theme-surface);
+      color: var(--theme-text);
+    }
+    .theme-preview[data-theme="dark"] {
+      color-scheme: dark;
+      --theme-surface: #171b24;
+      --theme-text: #f0f3f9;
+      --theme-accent: #9abaff;
+      --theme-muted: #617189;
+      --theme-edge: #46536a;
+      --theme-control: #252d3b;
+      --theme-control-hover: #364358;
+    }
+    .theme-preview[data-theme="compact"] {
+      --carousel-arrow-size: 28px;
+      --carousel-arrow-icon-size: 16px;
+      --carousel-arrow-radius: 6px;
+      --carousel-dot-width: 22px;
+      --carousel-dot-height: 4px;
+      --carousel-dot-radius: 8px;
+      --carousel-dot-scale-active: 1;
+      --carousel-dots-gap: 6px;
+      --carousel-thumb-width: 44px;
+      --carousel-thumb-height: 30px;
+      --carousel-thumb-gap: 4px;
+    }
+    .theme-slide { margin: 0; }
+    .theme-slide img { display: block; width: 100%; height: auto; }
+    .theme-slide figcaption { padding: 12px 4px; line-height: 1.5; }
     .demo-note { color: #555; line-height: 1.5; margin-bottom: 16px; max-width: 65ch; }
     .demo-status { display: block; margin-top: 12px; color: #444; font-size: .875rem; line-height: 1.5; }
     .height-host { width: 100%; transition: width .25s ease; }
@@ -134,7 +193,7 @@
        Demo 6: Person Cards (editor-style)
        ══════════════════════════════════════ */
 
-    #demo-persons .carousel {
+    #demo-persons {
       --carousel-arrow-size: 32px;
       --carousel-arrow-offset: 8px;
       --carousel-arrow-bg: transparent;
@@ -254,6 +313,7 @@
     <nav class="demo-links" aria-label="Demo navigation">
       <a href="#basic-example">Navigation</a>
       <a href="#transitions-example">Transitions</a>
+      <a href="#theming-example">Themes</a>
       <a href="#height-example">Auto-height</a>
       <a href="#dynamic-example">Dynamic slides</a>
       <a href="#lazy-example">Lazy loading</a>
@@ -372,6 +432,18 @@
       </div>
     </div>
     <output id="transition-status" class="demo-status" aria-live="polite"></output>
+  </section>
+
+  <section class="demo-section" id="theming-example">
+    <h2>15. Themes through CSS</h2>
+    <p class="demo-note">Switch between light, dark and compact themes. The same carousel keeps its current slide while the controls, thumbnails and transition panels change.</p>
+    <div id="demo-theming" class="theme-preview" data-theme="light"></div>
+    <div class="demo-controls" role="group" aria-label="Carousel theme presets">
+      <button type="button" data-theme-choice="light" aria-pressed="true">Light</button>
+      <button type="button" data-theme-choice="dark" aria-pressed="false">Dark</button>
+      <button type="button" data-theme-choice="compact" aria-pressed="false">Compact</button>
+    </div>
+    <output id="theme-status" class="demo-status" aria-live="polite"></output>
   </section>
 
   <script type="importmap">
@@ -792,6 +864,35 @@
     })
     transitionCarousel.on('slide:change', updateTransitionStatus)
     updateTransitionStatus()
+
+    // ── Demo 15: themes are inherited from the application-owned host ──
+    const themeHost = document.getElementById('demo-theming')
+    const themeSlides = Array.from({ length: 3 }, (_, index) => ({
+      thumb: `./demo-assets/panel-${index + 1}.svg`,
+      content: `<figure class="theme-slide"><img src="./demo-assets/panel-${index + 1}.svg" alt="Geometric panel ${index + 1}" width="800" height="400"><figcaption>Panel ${index + 1}</figcaption></figure>`,
+    }))
+    const themedCarousel = new Carousel(themeHost, themeSlides, {
+      loop: true,
+      transition: 'curtain',
+      transitionDuration: 700,
+      ariaLabel: 'CSS themes example',
+      plugins: [createArrows(), createDots(), createThumbnails(), createKeyboard(), createSwipe({ mouse: true })],
+    })
+    const themeLabels = { light: 'Light', dark: 'Dark', compact: 'Compact' }
+    const themeStatus = document.getElementById('theme-status')
+    function updateThemeStatus() {
+      themeStatus.textContent = `${themeLabels[themeHost.dataset.theme]} · slide ${themedCarousel.getIndex() + 1} of ${themeSlides.length}`
+    }
+    const themeButtons = document.querySelectorAll('[data-theme-choice]')
+    for (const button of themeButtons) {
+      button.addEventListener('click', () => {
+        themeHost.dataset.theme = button.dataset.themeChoice
+        for (const choice of themeButtons) choice.setAttribute('aria-pressed', String(choice === button))
+        updateThemeStatus()
+      })
+    }
+    themedCarousel.on('slide:change', updateThemeStatus)
+    updateThemeStatus()
 
     document.body.dataset.status = 'pass'
   </script>
