@@ -76,3 +76,32 @@ jobs:
       - name: Deploy demo
         id: deployment
         uses: actions/deploy-pages@v5
+
+      - name: Verify published demo revision
+        env:
+          PAGES_URL: ${{ steps.deployment.outputs.page_url }}
+          EXPECTED_REVISION: ${{ github.sha }}
+        run: |
+          python3 - <<'PY'
+          import json, os, time, urllib.error, urllib.parse, urllib.request
+          revision = os.environ['EXPECTED_REVISION']
+          url = urllib.parse.urljoin(os.environ['PAGES_URL'].rstrip('/') + '/', 'version.json')
+          url += '?revision=' + urllib.parse.quote(revision)
+          deadline = time.monotonic() + 180
+          problem = 'No response'
+          while time.monotonic() < deadline:
+              try:
+                  request = urllib.request.Request(url, headers={'Cache-Control': 'no-cache'})
+                  timeout = max(1, min(10, deadline - time.monotonic()))
+                  with urllib.request.urlopen(request, timeout=timeout) as response:
+                      data = json.load(response)
+                  if isinstance(data, dict) and data.get('revision') == revision:
+                      print('Published demo revision verified: ' + revision)
+                      break
+                  problem = 'The public site still reports another revision'
+              except (urllib.error.URLError, json.JSONDecodeError, TimeoutError) as error:
+                  problem = str(error)
+              time.sleep(min(3, max(0, deadline - time.monotonic())))
+          else:
+              raise SystemExit('Published demo verification failed: ' + problem)
+          PY
