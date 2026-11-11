@@ -2,8 +2,8 @@
  * Parallax plugin — depth effect (Embla-style).
  *
  * Each slide gets a `.carousel__parallax` overflow wrapper and
- * a `.carousel__parallax__layer` that shifts via translateX.
- * Content inside the layer should be wider than the slide
+ * a `.carousel__parallax__layer` that shifts along the carousel's axis.
+ * Content inside the layer should be larger than the slide on that axis
  * (e.g. images with object-fit:cover) to reveal the effect.
  *
  * @param {object} [options]
@@ -36,6 +36,10 @@ export function createParallax(options = {}) {
     ? ownerWindow.cancelAnimationFrame(id)
     : cancelAnimationFrame(id)
 
+  // Never adopt a nested carousel's decorative layer as this slide's wrapper.
+  const childWithClass = (parent, name) => [...parent.children]
+    .find(child => child.classList.contains(name)) ?? null
+
   function wrapSlides() {
     if (!ctx) return
     const slides = ctx.getVisualElements()
@@ -43,7 +47,7 @@ export function createParallax(options = {}) {
 
     layers = slides.map(slide => {
       const document = slide.ownerDocument ?? globalThis.document
-      let parallax = slide.querySelector('.carousel__parallax')
+      let parallax = childWithClass(slide, 'carousel__parallax')
       if (!parallax) {
         parallax = document.createElement('div')
         parallax.className = 'carousel__parallax'
@@ -53,16 +57,16 @@ export function createParallax(options = {}) {
         parallax.appendChild(layer)
         slide.appendChild(parallax)
       }
-      return parallax.querySelector('.carousel__parallax__layer')
+      return childWithClass(parallax, 'carousel__parallax__layer')
     })
   }
 
   function unwrapSlides() {
     const slides = ctx?.getVisualElements() ?? []
     for (let i = 0; i < slides.length; i++) {
-      const parallax = slides[i]?.querySelector('.carousel__parallax')
+      const parallax = childWithClass(slides[i], 'carousel__parallax')
       if (!parallax) continue
-      const layer = parallax.querySelector('.carousel__parallax__layer')
+      const layer = childWithClass(parallax, 'carousel__parallax__layer')
       if (layer) {
         while (layer.firstChild) slides[i].appendChild(layer.firstChild)
       }
@@ -86,6 +90,7 @@ export function createParallax(options = {}) {
     const pos = getVisualPosition()
     const count = ctx.getSlideCount()
     const visualSlides = ctx.getVisualElements()
+    const vertical = ctx.options?.orientation === 'vertical'
     if (count === 0) return
 
     for (let i = 0; i < layers.length; i++) {
@@ -97,7 +102,9 @@ export function createParallax(options = {}) {
       if (engine) {
         // LoopEngine provides the inline translated position of each slot.
         // Reading it avoids forced style/layout calculations on every frame.
-        const offset = Number.parseFloat(slide.style.transform.slice('translate3d('.length))
+        const transform = slide.style.transform
+        const coordinate = vertical ? transform.indexOf(',') + 1 : 'translate3d('.length
+        const offset = Number.parseFloat(transform.slice(coordinate))
         if (!Number.isFinite(offset)) { layers[i].style.transform = ''; continue }
         diffToTarget = offset / step / count
       } else {
@@ -106,7 +113,7 @@ export function createParallax(options = {}) {
       }
 
       const translate = diffToTarget * (-1 * tweenFactor) * 100
-      layers[i].style.transform = `translateX(${translate}%)`
+      layers[i].style.transform = `${vertical ? 'translateY' : 'translateX'}(${translate}%)`
     }
 
   }

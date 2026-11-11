@@ -12,6 +12,7 @@ const ownedPluginInstances = new WeakSet()
 /** @type {import('./types').CarouselOptions} */
 const DEFAULTS = {
   slidesPerView: 1,
+  orientation: 'horizontal',
   slidesPerScroll: 1,
   gap: 0,
   transition: 'slide',
@@ -22,6 +23,13 @@ const DEFAULTS = {
 }
 
 function validateResolvedOptions(options) {
+  if (options.orientation !== 'horizontal' && options.orientation !== 'vertical') {
+    throw new TypeError('Carousel: orientation must be "horizontal" or "vertical"')
+  }
+  if (options.viewportHeight !== undefined
+    && (!Number.isFinite(options.viewportHeight) || options.viewportHeight <= 0)) {
+    throw new RangeError('Carousel: viewportHeight must be a positive finite number')
+  }
   if (!Number.isFinite(options.slidesPerView) || options.slidesPerView <= 0) {
     throw new RangeError('Carousel: slidesPerView must be a positive number')
   }
@@ -101,7 +109,7 @@ function validateSlide(slide) {
  *
  * position = raw px, single source of truth.
  * Animation via requestAnimationFrame (no CSS transitions, no transitionend).
- * Slides repositioned via individual transforms (loop, no clones).
+ * Loop slides use individual transforms, with inert visual copies for short loops.
  */
 export class Carousel {
   #events = new EventBus()
@@ -200,6 +208,8 @@ export class Carousel {
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
       ariaLabel: opts.ariaLabel,
+      orientation: opts.orientation,
+      viewportHeight: opts.viewportHeight,
     })
     this.#initLoop()
     const count = this.#slideManager.getSlideCount()
@@ -212,8 +222,8 @@ export class Carousel {
     this.#position = this.#selectedIndex * this.#step()
     this.#render()
 
-    this.#trackRenderer.onResize((previousSlideWidth) => {
-      const previousStep = previousSlideWidth + this.#trackRenderer.gap
+    this.#trackRenderer.onResize((previousSlideSize) => {
+      const previousStep = previousSlideSize + this.#trackRenderer.gap
       if (this.#viewportTransition) {
         // A responsive geometry change settles the pending destination and
         // retires the decorative panels before publishing the resized state.
@@ -267,6 +277,7 @@ export class Carousel {
       // Always clear native focus-scroll, including when a newer application
       // command superseded the requested reveal or focus left the slide.
       viewport.scrollLeft = 0
+      viewport.scrollTop = 0
       if (!slide || request.cancelled) return
       const current = () => !this.#destroyed
         && this.#trackRenderer.getViewport() === viewport
@@ -278,11 +289,15 @@ export class Carousel {
       // geometry in the carousel's unscrolled coordinate system. These reads
       // happen only on focus, never in the animation/drag frame loop.
       const bounds = viewport.getBoundingClientRect()
-      if (bounds.width <= 0) return
+      const vertical = this.#resolvedOptions.orientation === 'vertical'
+      const size = vertical ? 'height' : 'width'
+      const start = vertical ? 'top' : 'left'
+      const end = vertical ? 'bottom' : 'right'
+      if (bounds[size] <= 0) return
       const control = focused.getBoundingClientRect()
-      const outside = control.width > bounds.width
-        ? control.right <= bounds.left || control.left >= bounds.right
-        : control.left < bounds.left - 0.5 || control.right > bounds.right + 0.5
+      const outside = control[size] > bounds[size]
+        ? control[end] <= bounds[start] || control[start] >= bounds[end]
+        : control[start] < bounds[start] - 0.5 || control[end] > bounds[end] + 0.5
       // Focusing another already-visible slide must not move a settled
       // multi-slide page. An active transition is interrupted for stable focus.
       if (!outside && !this.#animating) return
@@ -294,7 +309,7 @@ export class Carousel {
         if (!current() || this.#navigationEpoch !== epoch) return
       }
       this.#navigate(Number(slide.dataset.index), undefined, undefined, undefined, 0)
-      if (current()) viewport.scrollLeft = 0
+      if (current()) { viewport.scrollLeft = 0; viewport.scrollTop = 0 }
     })
   }
 
@@ -338,7 +353,7 @@ export class Carousel {
   }
 
   /** @returns {number} */
-  #step() { return this.#trackRenderer.slideWidth + this.#trackRenderer.gap }
+  #step() { return this.#trackRenderer.slideSize + this.#trackRenderer.gap }
 
   /**
    * Render position to DOM.
@@ -350,8 +365,9 @@ export class Carousel {
       this.#loop.positionSlides(
         this.#trackRenderer.getPositionElements(),
         this.#position,
-        this.#trackRenderer.viewportWidth,
-        this.#trackRenderer.slideWidth,
+        this.#trackRenderer.viewportSize,
+        this.#trackRenderer.slideSize,
+        this.#resolvedOptions.orientation,
       )
       return
     }
@@ -379,6 +395,8 @@ export class Carousel {
         gap: opts.gap ?? 0,
         loop: opts.loop ?? false,
         ariaLabel: opts.ariaLabel,
+        orientation: opts.orientation,
+        viewportHeight: opts.viewportHeight,
       })
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()
@@ -605,6 +623,7 @@ export class Carousel {
       },
       getStep: () => this.#step(),
       getLoopEngine: () => this.#loop,
+      getPlugin: name => this.getPlugin(name),
 
       getIndex: () => this.getIndex(),
       getRealIndex: () => this.getRealIndex(),
@@ -857,12 +876,13 @@ export class Carousel {
     const toEl = slides[toIdx]
     if (!fromEl || !toEl) { this.#animating = false; return }
 
-    const slideWidth = this.#trackRenderer.slideWidth
+    const slideSize = this.#trackRenderer.slideSize
+    const vertical = this.#resolvedOptions.orientation === 'vertical'
     const track = this.#trackRenderer.getTrack()
 
     // Lock track height before absolute positioning
     if (track) {
-      track.style.height = track.offsetHeight + 'px'
+      track.style.height = (vertical ? this.#trackRenderer.viewportSize : track.offsetHeight) + 'px'
       track.style.transform = 'none'
     }
 
@@ -871,7 +891,8 @@ export class Carousel {
       el.style.position = 'absolute'
       el.style.top = '0'
       el.style.left = '0'
-      el.style.width = slideWidth + 'px'
+      el.style.width = vertical ? '100%' : slideSize + 'px'
+      el.style.height = vertical ? slideSize + 'px' : ''
       el.style.opacity = el === fromEl ? '1' : '0'
       el.style.visibility = el === fromEl || el === toEl ? 'visible' : 'hidden'
       el.style.transform = ''
@@ -914,7 +935,8 @@ export class Carousel {
    * @param {HTMLElement | null} track
    */
   #restoreSlidesAfterFade(slides, track) {
-    const sw = this.#trackRenderer.slideWidth
+    const sw = this.#trackRenderer.slideSize
+    const vertical = this.#resolvedOptions.orientation === 'vertical'
     const loop = this.#loop !== null
     for (const el of slides) {
       el.style.position = loop ? 'absolute' : ''
@@ -923,8 +945,10 @@ export class Carousel {
       el.style.opacity = ''
       el.style.visibility = ''
       el.style.transition = ''
-      el.style.width = sw + 'px'
-      el.style.minWidth = sw + 'px'
+      el.style.width = vertical ? '100%' : sw + 'px'
+      el.style.minWidth = vertical ? '0' : sw + 'px'
+      el.style.height = vertical ? sw + 'px' : ''
+      el.style.minHeight = vertical ? sw + 'px' : ''
       el.style.flexBasis = sw + 'px'
     }
     if (track) {
@@ -1073,6 +1097,8 @@ export class Carousel {
         gap: opts.gap ?? 0,
         loop: opts.loop ?? false,
         ariaLabel: opts.ariaLabel,
+        orientation: opts.orientation,
+        viewportHeight: opts.viewportHeight,
       }, refreshContent)
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()

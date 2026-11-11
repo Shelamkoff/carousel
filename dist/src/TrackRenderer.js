@@ -2,7 +2,7 @@ import { isHTMLElement } from './dom.js'
 
 /**
  * DOM construction and positioning.
- * In loop mode: slides are absolutely positioned, each at `left: i * step`.
+ * In loop mode: slides are absolutely positioned along the selected axis.
  * Track does not use flex — slides controlled entirely by JS.
  */
 export class TrackRenderer {
@@ -31,12 +31,12 @@ export class TrackRenderer {
   /** @type {number} */
   #gap = 0
   /** @type {number} */
-  #slideWidth = 0
-  /** @type {((previousSlideWidth: number) => void) | null} */
+  #slideSize = 0
+  /** @type {((previousSlideSize: number) => void) | null} */
   #onResize = null
-  /** @type {number} */
   /** @type {boolean} */
   #isLoop = false
+  #vertical = false
   /** @type {((index: number, error: Error) => void) | null} */
   #onRenderError = null
   #document = null
@@ -46,7 +46,7 @@ export class TrackRenderer {
   /**
    * @param {HTMLElement} container
    * @param {import('./types').SlideData[]} slides
-   * @param {{ slidesPerView: number, gap: number, loop?: boolean, ariaLabel?: string }} layout
+   * @param {{ slidesPerView: number, gap: number, loop?: boolean, ariaLabel?: string, orientation?: 'horizontal' | 'vertical', viewportHeight?: number }} layout
    */
   build(container, slides, layout) {
     this.destroy()
@@ -79,6 +79,7 @@ export class TrackRenderer {
     this.#viewport = viewport
     this.#track = track
 
+    this.#configureOrientation(layout)
     this.#configureCopies(layout.slidesPerView)
     this.updateLayout(layout.slidesPerView, layout.gap)
     this.#setupResizeObserver()
@@ -173,14 +174,17 @@ export class TrackRenderer {
   }
 
   /** @type {number} */
-  #lastViewportWidth = 0
+  #lastViewportSize = 0
+  #lastViewportCrossSize = 0
 
   #setupResizeObserver() {
     if (!this.#viewport) return
-    this.#lastViewportWidth = this.#viewport.offsetWidth
+    this.#lastViewportSize = this.#measureViewportSize()
+    this.#lastViewportCrossSize = this.#vertical ? this.#viewport.offsetWidth : 0
     const Observer = this.#view?.ResizeObserver ?? ResizeObserver
     this.#resizeObserver = new Observer(() => {
-      if (this.#viewport && this.#viewport.offsetWidth !== this.#lastViewportWidth) {
+      if (this.#viewport && (this.#measureViewportSize() !== this.#lastViewportSize
+        || (this.#vertical && this.#viewport.offsetWidth !== this.#lastViewportCrossSize))) {
         this.#scheduleObservedLayout()
       }
     })
@@ -204,12 +208,14 @@ export class TrackRenderer {
     this.#observedLayoutFrame = requestFrame(() => {
       this.#observedLayoutFrame = 0
       if (!this.#viewport) return
-      const width = this.#viewport.offsetWidth
-      if (width !== this.#lastViewportWidth) {
-        this.#lastViewportWidth = width
-        const previousSlideWidth = this.#slideWidth
-        this.#recalcSlideWidth()
-        this.#onResize?.(previousSlideWidth)
+      const size = this.#measureViewportSize()
+      const crossSize = this.#vertical ? this.#viewport.offsetWidth : 0
+      if (size !== this.#lastViewportSize || crossSize !== this.#lastViewportCrossSize) {
+        this.#lastViewportSize = size
+        this.#lastViewportCrossSize = crossSize
+        const previousSlideSize = this.#slideSize
+        this.#recalcSlideSize()
+        this.#onResize?.(previousSlideSize)
       } else {
         this.#updateTrackHeight()
       }
@@ -224,7 +230,7 @@ export class TrackRenderer {
     this.#observedLayoutFrame = 0
   }
 
-  /** @param {(previousSlideWidth: number) => void} cb */
+  /** @param {(previousSlideSize: number) => void} cb */
   onResize(cb) { this.#onResize = cb }
 
   /** @param {(index: number, error: Error) => void} cb */
@@ -273,6 +279,22 @@ export class TrackRenderer {
     return true
   }
 
+  /** Keep orientation and viewport sizing together during atomic rebuilds. */
+  #configureOrientation(layout) {
+    this.#vertical = layout.orientation === 'vertical'
+    this.#root?.classList.toggle('carousel--vertical', this.#vertical)
+    if (this.#viewport) {
+      this.#viewport.style.height = this.#vertical && layout.viewportHeight !== undefined
+        ? layout.viewportHeight + 'px' : ''
+      this.#viewport.scrollLeft = 0
+      this.#viewport.scrollTop = 0
+    }
+  }
+
+  #measureViewportSize() {
+    return this.#vertical ? this.#viewport.offsetHeight : this.#viewport.offsetWidth
+  }
+
   /** @param {number} slidesPerView @param {number} gap */
   updateLayout(slidesPerView, gap) {
     if (!this.#viewport || !this.#track) return
@@ -281,20 +303,23 @@ export class TrackRenderer {
     this.#root?.style.setProperty('--carousel-gap', gap + 'px')
     // Non-loop: flex gap for spacing. Loop: gap handled by LoopEngine step.
     this.#track.style.gap = this.#isLoop ? '' : gap + 'px'
-    this.#recalcSlideWidth()
+    this.#recalcSlideSize()
   }
 
-  #recalcSlideWidth() {
+  #recalcSlideSize() {
     if (!this.#viewport) return
-    const vw = this.#viewport.offsetWidth
-    this.#lastViewportWidth = vw
+    const size = this.#measureViewportSize()
+    this.#lastViewportSize = size
+    this.#lastViewportCrossSize = this.#vertical ? this.#viewport.offsetWidth : 0
     const totalGap = this.#gap * (this.#slidesPerView - 1)
-    this.#slideWidth = Math.max(0, (vw - totalGap) / this.#slidesPerView)
+    this.#slideSize = Math.max(0, (size - totalGap) / this.#slidesPerView)
 
     for (const el of this.getPositionElements()) {
-      el.style.width = this.#slideWidth + 'px'
-      el.style.minWidth = this.#slideWidth + 'px'
-      el.style.flexBasis = this.#slideWidth + 'px'
+      el.style.width = this.#vertical ? '100%' : this.#slideSize + 'px'
+      el.style.minWidth = this.#vertical ? '0' : this.#slideSize + 'px'
+      el.style.height = this.#vertical ? this.#slideSize + 'px' : ''
+      el.style.minHeight = this.#vertical ? this.#slideSize + 'px' : ''
+      el.style.flexBasis = this.#slideSize + 'px'
       el.style.flexShrink = '0'
       el.style.flexGrow = '0'
 
@@ -312,13 +337,16 @@ export class TrackRenderer {
       }
     }
 
-    if (this.#isLoop && this.#track) {
-      this.#updateTrackHeight()
-    }
+    this.#updateTrackHeight()
   }
 
   #updateTrackHeight() {
-    if (!this.#isLoop || !this.#track) return
+    if (!this.#track) return
+    if (this.#vertical) {
+      this.#track.style.height = this.#lastViewportSize + 'px'
+      return
+    }
+    if (!this.#isLoop) return
     // Set track height from tallest slide (absolute positioning removes from flow)
     // Use scrollHeight as fallback since offsetHeight may be 0 before content renders
     let maxH = 0
@@ -331,13 +359,17 @@ export class TrackRenderer {
 
   /** Recalculate dimensions after a plugin renders or changes slide content. */
   refreshLayout() {
-    if (this.#isLoop) this.#updateTrackHeight()
+    if (this.#isLoop || this.#vertical) this.#updateTrackHeight()
   }
 
   /** @returns {number} */
-  get viewportWidth() { return this.#lastViewportWidth }
+  get viewportSize() { return this.#lastViewportSize }
+  /** Legacy main-axis alias; horizontal behavior is unchanged. */
+  get viewportWidth() { return this.#lastViewportSize }
   /** @returns {number} */
-  get slideWidth() { return this.#slideWidth }
+  get slideSize() { return this.#slideSize }
+  /** Legacy main-axis alias; horizontal behavior is unchanged. */
+  get slideWidth() { return this.#slideSize }
   /** @returns {number} */
   get gap() { return this.#gap }
   /** @returns {number} */
@@ -347,7 +379,8 @@ export class TrackRenderer {
   setPosition(offset) {
     if (!this.#track) return
     this.#track.style.transition = 'none'
-    this.#track.style.transform = `translate3d(${offset}px, 0, 0)`
+    this.#track.style.transform = this.#vertical
+      ? `translate3d(0, ${offset}px, 0)` : `translate3d(${offset}px, 0, 0)`
   }
 
   // Track animations are owned by Carousel's position controller.
@@ -355,7 +388,7 @@ export class TrackRenderer {
     if (this.#track) this.#track.style.transition = 'none'
   }
 
-  /** @param {import('./types').SlideData[]} slides @param {{ slidesPerView: number, gap: number, loop?: boolean, ariaLabel?: string }} layout */
+  /** @param {import('./types').SlideData[]} slides @param {{ slidesPerView: number, gap: number, loop?: boolean, ariaLabel?: string, orientation?: 'horizontal' | 'vertical', viewportHeight?: number }} layout */
   rebuild(slides, layout, refreshContent = false) {
     if (!this.#track) return
     const revision = ++this.#revision
@@ -367,6 +400,7 @@ export class TrackRenderer {
     this.#isLoop = layout.loop ?? false
     this.#root?.classList.toggle('carousel--loop', this.#isLoop)
     this.#root?.setAttribute('aria-label', layout.ariaLabel ?? 'Carousel')
+    this.#configureOrientation(layout)
 
     // Reuse the original DOM nodes for unchanged SlideData objects.
     // A breakpoint change must not wipe focus, input state or listeners.

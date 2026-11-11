@@ -9,9 +9,11 @@ export { createThumbnails } from './plugins/thumbnails.js'
 export { createKeyboard } from './plugins/keyboard.js'
 export { createSwipe } from './plugins/swipe.js'
 export { createAutoplay } from './plugins/autoplay.js'
+export { createControls } from './plugins/controls.js'
 export { createLazyLoad } from './plugins/lazyload.js'
 export { createParallax } from './plugins/parallax.js'
 export type { AutoplayPlugin } from './plugins/autoplay.js'
+export type { ControlsOptions, ControlsPlugin } from './plugins/controls.js'
 
 // Types
 export type {
@@ -28,4 +30,5 @@ export type {
   CarouselUpdateOptions,
   CarouselEventMap,
   CarouselEventName,
+  AutoplayState,
 } from './types.js'

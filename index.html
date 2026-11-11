@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>@shelamkoff/carousel — Live Demo</title>
-  <meta name="description" content="Interactive examples of responsive carousels, looped navigation, swipe, autoplay, thumbnails, and parallax.">
+  <meta name="description" content="Interactive horizontal and vertical carousels with fractional slides, themed playback controls, progress, transitions, swipe and thumbnails.">
   <link rel="canonical" href="https://shelamkoff.github.io/carousel/">
   <link rel="stylesheet" href="styles/carousel.css">
   <style>
@@ -101,6 +101,15 @@
       --carousel-focus-color: var(--theme-accent);
       --carousel-transition-color: var(--theme-accent);
       --carousel-control-duration: 150ms;
+      --carousel-controls-color: var(--theme-text);
+      --carousel-controls-bg: var(--theme-surface);
+      --carousel-play-color: var(--theme-text);
+      --carousel-play-bg: var(--theme-control);
+      --carousel-play-bg-hover: var(--theme-control-hover);
+      --carousel-play-border: 1px solid var(--theme-edge);
+      --carousel-progress-color: var(--theme-accent);
+      --carousel-progress-track: var(--theme-muted);
+      --carousel-counter-color: var(--theme-text);
       padding: 16px;
       border: 1px solid var(--theme-edge);
       border-radius: 12px;
@@ -129,11 +138,28 @@
       --carousel-thumb-width: 44px;
       --carousel-thumb-height: 30px;
       --carousel-thumb-gap: 4px;
+      --carousel-play-size: 30px;
+      --carousel-play-icon-size: 16px;
+      --carousel-play-radius: 6px;
+      --carousel-progress-size: 26px;
+      --carousel-counter-size: 12px;
+      --carousel-controls-gap: 8px;
     }
     .theme-slide { margin: 0; }
     .theme-slide img { display: block; width: 100%; height: auto; }
     .theme-slide figcaption { padding: 12px 4px; line-height: 1.5; }
     #demo-hover-arrows { --carousel-control-duration: 250ms; }
+    .gallery-settings { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin: 16px 0; }
+    .gallery-settings label { display: flex; align-items: center; gap: 8px; font-size: .875rem; }
+    .gallery-settings select { max-width: 100%; padding: 8px; border: 1px solid #a8b4c7; border-radius: 4px; font: inherit; background: #fff; color: #243248; }
+    .gallery-settings input { accent-color: #354791; }
+    .gallery-settings :focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
+    .gallery-card { height: 100%; margin: 0; display: flex; flex-direction: column; overflow: hidden; border-radius: 6px; background: var(--theme-surface); }
+    .gallery-card img { display: block; width: 100%; height: 280px; min-height: 0; object-fit: cover; flex: 1 1 auto; }
+    .gallery-card figcaption { padding: 12px; flex: 0 0 auto; line-height: 1.4; }
+    .gallery-options { margin-top: 16px; font-size: .875rem; }
+    .gallery-options summary { cursor: pointer; }
+    .gallery-options pre { overflow: auto; padding: 16px; margin-top: 12px; background: #fff; border: 1px solid #c8d1df; border-radius: 6px; line-height: 1.6; }
     .demo-note { color: #555; line-height: 1.5; margin-bottom: 16px; max-width: 65ch; }
     .demo-status { display: block; margin-top: 12px; color: #444; font-size: .875rem; line-height: 1.5; }
     .height-host { width: 100%; transition: width .25s ease; }
@@ -318,6 +344,8 @@
     <p class="demo-intro">Try the arrows, drag a slide, or focus the first carousel and use the arrow keys. Resize the page to explore responsive layouts.</p>
     <nav class="demo-links" aria-label="Demo navigation">
       <a href="#basic-example">Navigation</a>
+      <a href="#gallery-example">Vertical &amp; fractional</a>
+      <a href="#autoplay-example">Playback controls</a>
       <a href="#transitions-example">Transitions</a>
       <a href="#theming-example">Themes</a>
       <a href="#hover-arrows-example">Hover arrows</a>
@@ -341,13 +369,10 @@
   </div>
 
   <!-- Demo 3: Infinite loop + autoplay -->
-  <div class="demo-section">
+  <div class="demo-section" id="autoplay-example">
     <h2>3. Infinite Loop + Autoplay (hover to pause)</h2>
+    <p class="demo-note">Play or pause with the built-in button. The ring shows elapsed display time and freezes on hover, keyboard focus or pause.</p>
     <div id="demo-loop"></div>
-    <div class="demo-controls">
-      <button id="btn-play">Start Autoplay</button>
-      <button id="btn-stop">Stop Autoplay</button>
-    </div>
   </div>
 
   <!-- Demo 4: Fade transition -->
@@ -479,6 +504,36 @@
     <output id="hover-arrows-status" class="demo-status" aria-live="polite"></output>
   </section>
 
+  <section class="demo-section" id="gallery-example">
+    <h2>17. Fractional &amp; vertical gallery</h2>
+    <p class="demo-note">Show part of the next slide with 1.15 or 2.25 slides per view. Switch direction, hide individual controls and try another theme. Vertical galleries use Up/Down keys and vertical dragging.</p>
+    <div class="gallery-settings" role="group" aria-label="Gallery settings">
+      <label>Orientation
+        <select id="gallery-orientation"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select>
+      </label>
+      <label>Slides per view
+        <select id="gallery-per-view"><option value="1">1</option><option value="1.15" selected>1.15</option><option value="2.25">2.25</option><option value="3">3</option></select>
+      </label>
+      <label>Progress indicator
+        <select id="gallery-progress"><option value="circle">Circle</option><option value="bar">Bar</option><option value="off">Hidden</option></select>
+      </label>
+      <label>Controls position
+        <select id="gallery-controls-position"><option value="below">Below</option><option value="overlay">Overlay</option></select>
+      </label>
+      <label>Gallery theme
+        <select id="gallery-theme"><option value="light">Light</option><option value="dark">Dark</option><option value="compact">Compact</option></select>
+      </label>
+      <label><input id="gallery-play-pause" type="checkbox" checked> Show Play/Pause</label>
+      <label><input id="gallery-counter" type="checkbox" checked> Show slide counter</label>
+    </div>
+    <div id="demo-gallery" class="theme-preview" data-theme="light"></div>
+    <output id="gallery-status" class="demo-status" aria-live="polite"></output>
+    <details class="gallery-options">
+      <summary>Current options</summary>
+      <pre><code id="gallery-options-code"></code></pre>
+    </details>
+  </section>
+
   <script type="importmap">
     {
       "imports": {
@@ -494,6 +549,7 @@
       createKeyboard,
       createSwipe,
       createAutoplay,
+      createControls,
       createThumbnails,
       createParallax,
       createLazyLoad,
@@ -634,14 +690,8 @@
         createDots(),
         createSwipe({ mouse: true }),
         createAutoplay({ interval: 2500, pauseOnHover: true }),
+        createControls(),
       ],
-    })
-
-    document.getElementById('btn-play').addEventListener('click', () => {
-      loop.getPlugin('autoplay')?.start()
-    })
-    document.getElementById('btn-stop').addEventListener('click', () => {
-      loop.getPlugin('autoplay')?.stop()
     })
 
     // ── Demo 4: Fade ──
@@ -994,6 +1044,88 @@
     }
     hoverArrowCarousel.on('slide:change', updateHoverArrowStatus)
     updateHoverArrowStatus()
+
+    // ── Demo 17: orientation, fractional slides and optional playback UI ──
+    const galleryHost = document.getElementById('demo-gallery')
+    const galleryInputs = {
+      orientation: document.getElementById('gallery-orientation'),
+      perView: document.getElementById('gallery-per-view'),
+      progress: document.getElementById('gallery-progress'),
+      position: document.getElementById('gallery-controls-position'),
+      theme: document.getElementById('gallery-theme'),
+      playPause: document.getElementById('gallery-play-pause'),
+      counter: document.getElementById('gallery-counter'),
+    }
+    const galleryQuery = new URLSearchParams(location.search)
+    for (const [key, query] of [['orientation', 'orientation'], ['perView', 'slidesPerView'], ['progress', 'progress'], ['theme', 'theme']]) {
+      const value = galleryQuery.get(query)
+      if ([...galleryInputs[key].options].some(option => option.value === value)) galleryInputs[key].value = value
+    }
+    const gallerySlides = Array.from({ length: 7 }, (_, index) => ({
+      content: `<figure class="gallery-card"><img src="./demo-assets/panel-${index % 6 + 1}.svg" alt="Geometric composition ${index + 1}" width="800" height="400"><figcaption>Composition ${index + 1}</figcaption></figure>`,
+    }))
+    const galleryControls = createControls({
+      progress: galleryInputs.progress.value === 'off' ? false : galleryInputs.progress.value,
+    })
+    let galleryLayout = {
+      orientation: galleryInputs.orientation.value,
+      slidesPerView: Number(galleryInputs.perView.value),
+    }
+    const gallery = new Carousel(galleryHost, gallerySlides, {
+      ...galleryLayout,
+      viewportHeight: 420,
+      gap: 16,
+      loop: true,
+      ariaLabel: 'Fractional and vertical gallery',
+      plugins: [
+        createArrows({ hideOnIdle: true }), createKeyboard(), createSwipe({ mouse: true }),
+        galleryControls,
+        createAutoplay({ interval: 4500, pauseOnInteraction: false }),
+      ],
+    })
+    function updateGallerySettings() {
+      const nextLayout = {
+        orientation: galleryInputs.orientation.value,
+        slidesPerView: Number(galleryInputs.perView.value),
+      }
+      if (nextLayout.orientation !== galleryLayout.orientation || nextLayout.slidesPerView !== galleryLayout.slidesPerView) {
+        gallery.update(nextLayout)
+        galleryLayout = nextLayout
+      }
+      galleryControls.update({
+        playPause: galleryInputs.playPause.checked,
+        counter: galleryInputs.counter.checked,
+        progress: galleryInputs.progress.value === 'off' ? false : galleryInputs.progress.value,
+        position: galleryInputs.position.value,
+      })
+      galleryHost.dataset.theme = galleryInputs.theme.value
+      const orientationLabel = galleryInputs.orientation.value === 'vertical' ? 'Vertical' : 'Horizontal'
+      document.getElementById('gallery-status').textContent = `${orientationLabel} · ${galleryInputs.perView.value} slides per view · 7 slides`
+      document.getElementById('gallery-options-code').textContent = `new Carousel(host, slides, {
+  orientation: '${galleryInputs.orientation.value}',
+  viewportHeight: 420,
+  slidesPerView: ${galleryInputs.perView.value}, gap: 16, loop: true,
+  plugins: [
+    createArrows({ hideOnIdle: true }), createKeyboard(), createSwipe({ mouse: true }),
+    createAutoplay({ interval: 4500, pauseOnInteraction: false }),
+    createControls({
+      playPause: ${galleryInputs.playPause.checked}, counter: ${galleryInputs.counter.checked},
+      progress: ${galleryInputs.progress.value === 'off' ? 'false' : `'${galleryInputs.progress.value}'`}, position: '${galleryInputs.position.value}',
+    }),
+  ],
+})`
+    }
+    for (const input of Object.values(galleryInputs)) input.addEventListener('change', () => {
+      updateGallerySettings()
+      const url = new URL(location.href)
+      url.searchParams.set('orientation', galleryInputs.orientation.value)
+      url.searchParams.set('slidesPerView', galleryInputs.perView.value)
+      url.searchParams.set('progress', galleryInputs.progress.value)
+      url.searchParams.set('theme', galleryInputs.theme.value)
+      url.hash = 'gallery-example'
+      history.replaceState(null, '', url)
+    })
+    updateGallerySettings()
 
     document.body.dataset.status = 'pass'
   </script>

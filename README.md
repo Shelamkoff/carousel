@@ -98,8 +98,10 @@ interface SlideData {
 
 | Option | Type | Default | Purpose |
 | --- | --- | --- | --- |
-| `slidesPerView` | `number` | `1` | Number of visible slides. Positive values are required. |
+| `slidesPerView` | `number` | `1` | Number of visible slides; positive fractions such as `1.15` and `2.25` are supported. |
 | `slidesPerScroll` | `number \| 'auto'` | `1` | Navigation step. `'auto'` uses the resolved visible count. |
+| `orientation` | `'horizontal' \| 'vertical'` | `'horizontal'` | Navigation, layout, keyboard, swipe and parallax axis. |
+| `viewportHeight` | `number` | CSS `400px` | Positive viewport height in CSS pixels, used only in vertical mode. Omit to use `--carousel-vertical-height`. |
 | `gap` | `number` | `0` | Gap between slides in CSS pixels. |
 | `transition` | `CarouselTransition` | `'slide'` | A built-in name or a custom transition definition. See transitions below. |
 | `transitionDuration` | `number` | `400` | Transition duration in milliseconds. |
@@ -121,6 +123,55 @@ const carousel = new Carousel('#gallery', slides, {
   },
 })
 ```
+
+### Fractional and vertical galleries
+
+`slidesPerView` is not rounded. `1.15` and `2.25` show a partial next slide, with the specified `gap`; they work in finite and loop layouts. `slidesPerScroll: 'auto'` advances the whole-number portion (at least one), while an explicit positive integer controls the step independently.
+
+```js
+const gallery = new Carousel('#gallery', slides, {
+  orientation: 'vertical',
+  viewportHeight: 420,
+  slidesPerView: 1.15,
+  gap: 16,
+  loop: true,
+  plugins: [createArrows(), createKeyboard(), createSwipe({ mouse: true })],
+})
+gallery.update({ slidesPerView: 2.25 })
+```
+
+Vertical mode uses Up/Down keys, vertical dragging and top/bottom arrows. Cross-axis touch scrolling and pinch zoom remain available. A vertical gallery needs a bounded viewport: use `viewportHeight`, or omit it and set `--carousel-vertical-height: clamp(280px, 60vh, 520px)` on the host. The CSS fallback is `400px`. Horizontal mode keeps its content-driven height. Both options can be changed through `update()` or breakpoints; breakpoint thresholds still refer to window width. All transition presets work with either orientation; mask designs such as `stairs-horizontal` retain their own visual direction.
+
+[Try fractional slides, vertical navigation and themed controls](https://shelamkoff.github.io/carousel/?orientation=vertical&slidesPerView=1.15#gallery-example).
+
+### Playback controls, elapsed time and counter
+
+`createControls()` adds optional UI. It can be installed before or after `createAutoplay()`; playback and time progress are visible only when autoplay is installed. The counter also works without autoplay.
+
+```js
+const controls = createControls({
+  playPause: true,
+  progress: 'circle', // 'circle', 'bar', or false
+  counter: true,
+  position: 'below', // 'below' or 'overlay'
+  labels: { play: 'Play slideshow', pause: 'Pause slideshow' },
+})
+const gallery = new Carousel('#gallery', slides, {
+  slidesPerView: 2.25,
+  gap: 16,
+  loop: true,
+  plugins: [
+    createArrows(), createSwipe({ mouse: true }),
+    createAutoplay({ interval: 4500, pauseOnInteraction: false }),
+    controls,
+  ],
+})
+controls.update({ progress: 'bar', counter: false })
+```
+
+Each visibility option is independent and can be updated without remounting the carousel. Progress uses the autoplay deadline: pause freezes it, Play resumes the remaining time, and the next slide gets a full display interval after its transition. Hover, keyboard focus and hidden tabs suspend playback. Explicit Play can resume while its button is hovered/focused; moving focus into another control pauses again. `pauseOnInteraction` defaults to `true`; use `false` to continue after manual navigation. See [Autoplay](src/plugins/autoplay/README.md) and [Controls](src/plugins/controls/README.md) for the API and localization options.
+
+The counter displays the selected logical slide and total source count, for example `1 / 7`, or `0 / 0` for an empty carousel. Visual copies are excluded. In a finite multi-slide layout the final selection can be `6 / 7` because slide 7 is already visible beside slide 6. It is a slide counter, not a page count. `formatCounter(current, total)` customizes its text safely.
 
 ## Transitions
 
@@ -242,6 +293,14 @@ All names below have the `--carousel-` prefix.
 | --- | --- |
 | `radius`, `transition-color` | Viewport clipping radius `0`; reveal panels `#17181b`. |
 | `transition-highlight` | `rgba(255, 255, 255, 0.18)`; aperture blades, tile edges, doorway lighting and ripples. |
+| `vertical-height` | `400px`; vertical viewport height when `viewportHeight` is omitted. |
+| `controls-align`, `controls-gap`, `controls-padding` | `center`, `12px`, `12px 0`; overlay padding defaults to `6px 12px`. |
+| `controls-bg`, `controls-color`, `controls-border`, `controls-radius`, `controls-offset` | Background, foreground, border and corner radius; overlay edge offset `12px`. |
+| `play-size`, `play-icon-size`, `play-radius`, `play-border` | `40px`, `20px`, `50%`, `1px solid currentColor`. |
+| `play-bg`, `play-bg-hover`, `play-color`, `play-color-hover` | Playback button surfaces and colors; icon inherits `currentColor`. |
+| `progress-size`, `progress-stroke`, `progress-color`, `progress-track` | Ring `32px`, stroke `3`, foreground `currentColor`, track gray at 25% opacity. |
+| `progress-width`, `progress-height`, `progress-radius` | Bar `96px` × `4px`, radius `999px`. |
+| `counter-color`, `counter-size`, `counter-weight` | Inherited color, `14px`, `500`; tabular numerals. |
 | `arrow-size`, `arrow-icon-size`, `arrow-offset` | Button `40px`, built-in SVG `24px`, distance from the viewport edge `12px`. |
 | `arrow-bg`, `arrow-bg-hover` | `rgba(255, 255, 255, 0.9)` / `#fff`. |
 | `arrow-color`, `arrow-color-hover` | `#333` / `#111`; built-in icons use `currentColor`. |
@@ -256,7 +315,7 @@ All names below have the `--carousel-` prefix.
 | `thumb-border-width`, `thumb-border-color`, `thumb-border-color-active` | `2px` / `transparent` / `#333`. |
 | `thumb-radius`, `thumb-opacity`, `thumb-opacity-hover`, `thumb-opacity-active` | `4px` / `0.6` / `0.9` / `1`. |
 | `focus-color`, `focus-width`, `focus-offset` | `currentColor` / `2px` / `3px`; keyboard focus on the region and controls. |
-| `control-duration`, `control-timing` | `200ms` / `ease`; visual state changes on arrows, dots and thumbnails. |
+| `control-duration`, `control-timing` | `200ms` / `ease`; visual state changes on arrows, dots, thumbnails and playback buttons. |
 | `lazy-fade-duration` | `300ms`; the lazy-content appearance animation. |
 
 For a complete custom design, style `.carousel__arrow`, `.carousel__dot` and `.carousel__thumb` with ordinary CSS after the library stylesheet. Selected dots and thumbnails expose `.carousel__dot--active`, `.carousel__thumb--active` and `aria-current="page"`; hover and keyboard focus use the usual pseudo-classes. Custom arrow HTML keeps its own dimensions; the icon-size token applies only to the built-in `.carousel__arrow-icon`. Slide contents are application-owned and can use your existing typography, backgrounds and spacing.
@@ -296,6 +355,7 @@ Do not call methods after `destroy()`. Create a new instance if the host needs t
 | `transition:error` | `{ name, error }` |
 | `resize` | `{ slidesPerView }` |
 | `autoplay:start` / `autoplay:stop` | no payload |
+| `autoplay:state` | `{ available, active, paused, running, interval, remaining, progress }`; emitted on state changes, not every frame. |
 | `slide:lazyload` | `{ index, element }` |
 | `slide:error` | `{ index, error }` |
 | `destroy` | no payload |
@@ -310,6 +370,7 @@ Rendering and lazy-load failures are isolated to the affected slide. After const
 - [Keyboard](src/plugins/keyboard/README.md) — focus-scoped arrow keys by default; document-wide handling is opt-in.
 - [Swipe](src/plugins/swipe/README.md) — touch, pointer, resistance, and optional mouse drag.
 - [Autoplay](src/plugins/autoplay/README.md) — interval playback with hover and interaction pausing.
+- [Controls](src/plugins/controls/README.md) — optional Play/Pause, circular or bar time progress, and slide counter.
 - [Lazy load](src/plugins/lazyload/README.md) — observer-based image loading and configurable preloading.
 - [Parallax](src/plugins/parallax/README.md) — position-driven visual offset.
 
@@ -353,7 +414,7 @@ export function createProgressPlugin() {
 }
 ```
 
-The frozen context exposes owned event subscriptions, navigation commands, read-only state and resolved options, live DOM getters, position methods for gesture/effect plugins, and `refreshLayout()`. Context subscriptions are removed automatically. The plugin must still release its own DOM, global listeners, observers, timers, animation frames, object URLs, and third-party instances in `destroy()`.
+The frozen context exposes owned event subscriptions, navigation commands, read-only state and resolved options, live DOM getters, position methods for gesture/effect plugins, and `refreshLayout()`. `getPlugin(name)` returns an already installed optional plugin or `undefined`. Context subscriptions are removed automatically. The plugin must still release its own DOM, global listeners, observers, timers, animation frames, object URLs, and third-party instances in `destroy()`.
 
 If `install()` throws, the carousel rolls back context subscriptions and invokes the plugin cleanup. Make `destroy()` safe after partial installation.
 
@@ -369,7 +430,7 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, hover-reveal arrows, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, all 12 cover transitions and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive horizontal/vertical layouts, fractional `1.15` / `2.25` views, themed playback controls, time progress, slide counters, autoplay, fade, thumbnails, parallax, custom themes, hover-reveal arrows, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, all 12 cover transitions and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
 
 GitHub Pages is published by `.github/workflows/pages.yml` on pushes to `master`, the configured Pages source branch. The workflow tests and builds the project, then stages only `index.html`, runtime JavaScript, CSS and demo assets through `scripts/build-pages.mjs`. It deploys a static artifact without Jekyll. `/version.json` records the deployed commit SHA. Generated staging directories live outside the repository.
 

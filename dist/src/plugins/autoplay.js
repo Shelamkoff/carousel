@@ -1,180 +1,308 @@
 import { getLastSlideIndex } from '../navigation.js'
 
 /**
- * Autoplay plugin — auto-advance synchronized with animation.
- * Uses setTimeout chained after transition:end (not setInterval).
- *
+ * One deadline owns both auto-advance and the public progress snapshot.
+ * Temporary suspension and stop/start preserve the remaining display time;
+ * navigation starts a fresh interval only after its transition settles.
  * @param {object} [options]
  * @param {number} [options.interval=3000]
  * @param {boolean} [options.pauseOnHover=true]
  * @param {boolean} [options.pauseOnInteraction=true]
- * @returns {import('../types').CarouselPlugin}
+ * @param {boolean} [options.pauseOnFocus=true]
+ * @returns {import('./autoplay').AutoplayPlugin}
  */
 export function createAutoplay(options = {}) {
-  let ctx = null
-  let unsubs = []
-  let timer = null
-  let installed = false
-  let active = false
-  let paused = false
-  let autoplayTriggered = false
-  let autoNavigationStarted = false
-  const heldPointers = new Set()
-  let onPointerDown = null
-  let onPointerEnd = null
-  let eventWindow = null
-
   const interval = options.interval ?? 3000
   const pauseOnHover = options.pauseOnHover ?? true
   const pauseOnInteraction = options.pauseOnInteraction ?? true
-  if (!Number.isFinite(interval) || interval <= 0) {
-    throw new RangeError('Carousel autoplay interval must be a positive number')
+  const pauseOnFocus = options.pauseOnFocus ?? true
+  // Native setTimeout converts larger delays to a near-immediate callback.
+  if (!Number.isFinite(interval) || interval <= 0 || interval > 2147483647) {
+    throw new RangeError('Carousel autoplay interval must be greater than 0 and at most 2147483647 milliseconds')
   }
-  if (typeof pauseOnHover !== 'boolean' || typeof pauseOnInteraction !== 'boolean') {
+  if ([pauseOnHover, pauseOnInteraction, pauseOnFocus].some(value => typeof value !== 'boolean')) {
     throw new TypeError('Carousel autoplay pause options must be booleans')
   }
 
-  /** @type {(() => void) | null} */
-  let onEnter = null
-  /** @type {(() => void) | null} */
-  let onLeave = null
+  let ctx = null
+  let unsubs = []
+  let removers = []
+  let eventWindow = null
+  let timer = null
+  let timerVersion = 0
+  let deadline = null
+  let remaining = interval
+  let installed = false
+  let active = false
+  let transitioning = false
+  let hovered = false
+  let focused = false
+  let hidden = false
+  let ignoreHover = false
+  let ignoreFocus = false
+  let autoplayTriggered = false
+  let autoNavigationStarted = false
+  let lastIndex = 0
+  let lastCount = 0
+  const heldPointers = new Set()
 
-  function scheduleNext() {
-    clearTimeout(timer)
-    if (!installed || !active || paused || heldPointers.size > 0) return
-    timer = setTimeout(() => {
+  const now = () => eventWindow?.performance?.now?.() ?? globalThis.performance.now()
+  const readRemaining = () => deadline === null ? remaining : Math.max(0, deadline - now())
+  const suspended = () => transitioning || hidden || heldPointers.size > 0
+    || (hovered && !ignoreHover) || (focused && !ignoreFocus)
+
+  function getState() {
+    const time = Math.max(0, Math.min(interval, readRemaining()))
+    return Object.freeze({
+      available: installed,
+      active,
+      paused: active && suspended(),
+      running: installed && active && timer !== null,
+      interval,
+      remaining: time,
+      progress: 1 - time / interval,
+    })
+  }
+
+  function publish() { ctx?.emit('autoplay:state', getState()) }
+
+  function cancelTimer(preserve = true) {
+    if (preserve) remaining = readRemaining()
+    ++timerVersion
+    if (timer !== null) {
+      const clear = eventWindow?.clearTimeout?.bind(eventWindow) ?? clearTimeout
+      clear(timer)
+    }
+    timer = null
+    deadline = null
+  }
+
+  function canAdvance() {
+    if (!ctx) return false
+    const count = ctx.getSlideCount()
+    if (count <= 1) return false
+    if (ctx.isLoop()) return (ctx.getSlidesPerScroll?.() ?? 1) % count !== 0
+    return ctx.getIndex() < getLastSlideIndex(count, ctx.getSlidesPerView())
+  }
+
+  function schedule() {
+    if (!installed || !active || suspended() || timer !== null) return
+    if (!canAdvance()) {
+      stop()
+      return
+    }
+    // An exhausted interval (e.g. a stopped timer callback) gets one new turn.
+    if (remaining <= 0) remaining = interval
+    const owner = ctx
+    const version = ++timerVersion
+    deadline = now() + remaining
+    const set = eventWindow?.setTimeout?.bind(eventWindow) ?? setTimeout
+    timer = set(() => {
+      if (!installed || ctx !== owner || version !== timerVersion) return
       timer = null
-      if (!installed || !active || paused || heldPointers.size > 0) return
-      const count = ctx?.getSlideCount() ?? 0
-      const maxIndex = getLastSlideIndex(count, ctx?.getSlidesPerView() ?? 1)
-      if (count <= 1 || (!ctx?.isLoop() && (ctx?.getIndex() ?? 0) >= maxIndex)) {
-        active = false
-        timer = null
-        autoplayTriggered = false
-        ctx?.emit('autoplay:stop')
-        return
-      }
+      deadline = null
+      remaining = 0
+      if (!active || suspended()) { publish(); return }
+      if (!canAdvance()) { stop(); return }
       autoNavigationStarted = false
       autoplayTriggered = true
       try {
-        ctx?.next()
+        owner.next()
       } finally {
-        // If navigation was locked/no-op, no transition:end will arrive.
         autoplayTriggered = false
-        if (active && !paused && !autoNavigationStarted) scheduleNext()
+        // Locked/no-op navigation emits no completion event. Retry with one
+        // complete interval, without leaving a hot zero-delay timer behind.
+        if (installed && ctx === owner && active && !autoNavigationStarted) {
+          remaining = interval
+          schedule()
+          publish()
+        }
       }
-    }, interval)
+    }, remaining)
   }
 
-  return {
+  function suspendOrResume() {
+    if (suspended()) cancelTimer()
+    else schedule()
+    publish()
+  }
+
+  function stop() {
+    if (!active) return
+    cancelTimer()
+    active = false
+    const owner = ctx
+    owner?.emit('autoplay:stop')
+    // A stop listener may explicitly start again; report its final state.
+    if (ctx === owner) publish()
+  }
+
+  function start(explicit = true) {
+    if (!installed) return
+    if (!active && !canAdvance()) {
+      if (!explicit) publish()
+      return
+    }
+    const wasPaused = suspended()
+    const wasRunning = timer !== null
+    if (explicit) {
+      // A keyboard or pointer user must be able to press Play while the
+      // control is focused/hovered. The next entry or focus move pauses again.
+      ignoreHover = hovered
+      ignoreFocus = focused
+    }
+    const wasActive = active
+    active = true
+    const owner = ctx
+    schedule()
+    if (!wasActive && active && installed && ctx === owner) owner.emit('autoplay:start')
+    if (ctx === owner && (!wasActive || wasPaused !== suspended() || wasRunning !== (timer !== null))) publish()
+  }
+
+  function listen(target, event, handler) {
+    if (!target?.addEventListener) return
+    target.addEventListener(event, handler)
+    removers.push(() => target.removeEventListener(event, handler))
+  }
+
+  const plugin = {
     name: 'autoplay',
 
     install(context) {
       ctx = context
       installed = true
+      active = false
+      transitioning = false
+      remaining = interval
+      deadline = null
+      ignoreHover = ignoreFocus = false
+      heldPointers.clear()
       const root = context.getRoot()
-
-      if (pauseOnHover && root) {
-        onEnter = () => { paused = true; clearTimeout(timer); timer = null }
-        onLeave = () => { paused = false; if (active) scheduleNext() }
-        root.addEventListener('mouseenter', onEnter)
-        root.addEventListener('mouseleave', onLeave)
-      }
-
-      // Pointer interaction may cancel an in-flight carousel transition,
-      // which has no transition:end event to restart the autoplay timer.
-      // Stop on interaction when configured, otherwise suspend the timer
-      // until the user releases/cancels their pointer.
       const viewport = context.getViewport?.()
-      if (viewport) {
-        eventWindow = viewport.ownerDocument?.defaultView ?? window
-        onPointerDown = event => {
-          if (pauseOnInteraction) {
-            this.stop()
-          } else {
-            heldPointers.add(event.pointerId)
-            clearTimeout(timer)
-            timer = null
-          }
-        }
-        onPointerEnd = event => {
-          if (!heldPointers.delete(event.pointerId) || heldPointers.size > 0) return
-          if (active && !paused) scheduleNext()
-        }
-        viewport.addEventListener('pointerdown', onPointerDown)
-        eventWindow.addEventListener('pointerup', onPointerEnd)
-        eventWindow.addEventListener('pointercancel', onPointerEnd)
+      const document = root?.ownerDocument ?? viewport?.ownerDocument
+      eventWindow = document?.defaultView ?? globalThis.window ?? null
+      hidden = document?.hidden === true
+      hovered = pauseOnHover && !!root?.matches?.(':hover')
+      focused = pauseOnFocus && !!root?.contains?.(document?.activeElement)
+      lastIndex = context.getIndex()
+      lastCount = context.getSlideCount()
+
+      if (pauseOnHover) {
+        listen(root, 'mouseenter', () => {
+          hovered = true
+          ignoreHover = false
+          suspendOrResume()
+        })
+        listen(root, 'mouseleave', () => {
+          hovered = false
+          ignoreHover = false
+          suspendOrResume()
+        })
       }
+      if (pauseOnFocus) {
+        listen(root, 'focusin', () => {
+          focused = true
+          ignoreFocus = false
+          suspendOrResume()
+        })
+        listen(root, 'focusout', event => {
+          if (root?.contains?.(event.relatedTarget)) return
+          focused = false
+          ignoreFocus = false
+          suspendOrResume()
+        })
+      }
+      listen(document, 'visibilitychange', () => {
+        hidden = document.hidden === true
+        suspendOrResume()
+      })
+
+      listen(viewport, 'pointerdown', event => {
+        const path = event.composedPath?.() ?? [event.target]
+        if (path.some(node => node?.classList?.contains?.('carousel__controls'))
+          || event.target?.closest?.('.carousel__controls')) return
+        // Dragging may cancel a transition without its completion event.
+        transitioning = false
+        if (pauseOnInteraction) stop()
+        else {
+          heldPointers.add(event.pointerId)
+          suspendOrResume()
+        }
+      })
+      const releasePointer = event => {
+        if (!heldPointers.delete(event.pointerId)) return
+        suspendOrResume()
+      }
+      listen(eventWindow, 'pointerup', releasePointer)
+      listen(eventWindow, 'pointercancel', releasePointer)
 
       unsubs.push(
-        context.on('transition:end', () => {
-          if (active && !paused) scheduleNext()
-        }),
-        // A rebuild can cancel the current transition without transition:end.
-        context.on('resize', () => {
-          if (active && !paused) scheduleNext()
-        }),
         context.on('slide:beforeChange', () => {
+          cancelTimer(false)
+          remaining = interval
+          transitioning = true
           if (autoplayTriggered) autoNavigationStarted = true
-          else if (pauseOnInteraction && active) this.stop()
+          else if (pauseOnInteraction && active) { stop(); return }
+          publish()
+        }),
+        context.on('transition:end', () => {
+          cancelTimer(false)
+          remaining = interval
+          transitioning = false
+          lastIndex = context.getIndex()
+          lastCount = context.getSlideCount()
+          schedule()
+          publish()
+        }),
+        context.on('resize', () => {
+          // Resizing/rebuilding may cancel the transition. A pure size change
+          // preserves the countdown; changed content/index gets a new period.
+          const reset = transitioning || context.getIndex() !== lastIndex
+            || context.getSlideCount() !== lastCount
+          cancelTimer(!reset)
+          if (reset) remaining = interval
+          transitioning = false
+          lastIndex = context.getIndex()
+          lastCount = context.getSlideCount()
+          schedule()
+          publish()
         }),
       )
-
-      this.start()
+      start(false)
     },
 
     destroy() {
-      // Keep the stop notification, but do not allow it to restart retired work.
+      if (!installed && !ctx) return
+      const owner = ctx
+      const wasActive = active
       installed = false
-      this.stop()
-      unsubs.forEach(fn => fn())
-      unsubs = []
-      const root = ctx?.getRoot()
-      if (root) {
-        if (onEnter) root.removeEventListener('mouseenter', onEnter)
-        if (onLeave) root.removeEventListener('mouseleave', onLeave)
-      }
-      const viewport = ctx?.getViewport?.()
-      if (viewport && onPointerDown) viewport.removeEventListener('pointerdown', onPointerDown)
-      if (onPointerEnd) {
-        eventWindow?.removeEventListener('pointerup', onPointerEnd)
-        eventWindow?.removeEventListener('pointercancel', onPointerEnd)
-      }
-      eventWindow = null
-      heldPointers.clear()
-      onPointerDown = null
-      onPointerEnd = null
-      onEnter = null
-      onLeave = null
-      ctx = null
-    },
-
-    start() {
-      if (!installed) return
-      if (active) {
-        if (ctx && !paused && timer === null) scheduleNext()
-        return
-      }
-      active = true
-      paused = false
-      autoplayTriggered = false
-      scheduleNext()
-      ctx?.emit('autoplay:start')
-    },
-
-    stop() {
-      if (!active) return
       active = false
-      clearTimeout(timer)
-      timer = null
-      ctx?.emit('autoplay:stop')
+      cancelTimer()
+      const retiredUnsubs = unsubs
+      const retiredRemovers = removers
+      unsubs = []
+      removers = []
+      retiredUnsubs.forEach(remove => remove())
+      retiredRemovers.forEach(remove => remove())
+      heldPointers.clear()
+      transitioning = false
+      hovered = focused = hidden = false
+      ignoreHover = ignoreFocus = false
+      autoplayTriggered = autoNavigationStarted = false
+      eventWindow = null
+      ctx = null
+      const state = getState()
+      // Keep teardown notifications, after retiring resources. Callbacks
+      // cannot restart this owner, and a new installation is left untouched.
+      if (wasActive) owner?.emit('autoplay:stop')
+      owner?.emit('autoplay:state', state)
     },
 
-    toggle() {
-      if (active) this.stop()
-      else this.start()
-    },
-
+    start() { start() },
+    stop,
+    toggle() { if (active) stop(); else start() },
     isActive() { return active },
+    getState,
   }
+  return plugin
 }

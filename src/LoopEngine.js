@@ -1,7 +1,7 @@
 /**
  * Circular position engine.
  *
- * Positions are measured in slide steps (slide width + gap). Logical indexes
+ * Positions are measured in slide steps (main-axis slide size + gap). Logical indexes
  * never refer to visual copies: a copy is only another rendering of a slide.
  */
 export class LoopEngine {
@@ -92,8 +92,9 @@ export class LoopEngine {
    * @param {number} position
    * @param {number} [viewportWidth] — necessary to promote interactive originals over copies
    * @param {number} [slideWidth]
+   * @param {'horizontal' | 'vertical'} [orientation]
    */
-  positionSlides(slides, position, viewportWidth = 0, slideWidth = 0) {
+  positionSlides(slides, position, viewportWidth = 0, slideWidth = 0, orientation = 'horizontal') {
     if (this.#count === 0 || this.#step <= 0) return
     const loopLength = this.#loopLength
     const normalized = this.normalize(position)
@@ -138,7 +139,9 @@ export class LoopEngine {
     }
 
     for (const { slide, x } of slots) {
-      slide.style.transform = 'translate3d(' + x + 'px, 0, 0)'
+      slide.style.transform = orientation === 'vertical'
+        ? 'translate3d(0, ' + x + 'px, 0)'
+        : 'translate3d(' + x + 'px, 0, 0)'
     }
   }
 

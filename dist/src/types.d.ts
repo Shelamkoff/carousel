@@ -60,6 +60,8 @@ export interface PluginContext {
   getSlidesPerView(): number
   getSlidesPerScroll(): number
   isLoop(): boolean
+  /** Installed plugin lookup; optional plugins may not be present yet. */
+  getPlugin(name: string): CarouselPlugin | undefined
 
   // Resolved options (reflects current breakpoint)
   options: Readonly<CarouselOptions>
@@ -95,6 +97,9 @@ export interface CarouselPlugin {
 export interface CarouselOptions {
   slidesPerView?: number
   slidesPerScroll?: number | 'auto'
+  orientation?: 'horizontal' | 'vertical'
+  /** Vertical viewport height in CSS pixels. Omit to use --carousel-vertical-height. */
+  viewportHeight?: number
   gap?: number
   transition?: CarouselTransition
   transitionDuration?: number
@@ -110,6 +115,21 @@ export type CarouselUpdateOptions = Omit<CarouselOptions, 'plugins' | 'startInde
 
 /* ── Events ── */
 
+export interface AutoplayState {
+  /** False after the autoplay plugin is destroyed. */
+  readonly available: boolean
+  /** Whether automatic playback has been requested. */
+  readonly active: boolean
+  /** Playback is suspended by a transition, hover, focus, pointer or hidden page. */
+  readonly paused: boolean
+  /** The display interval is currently counting down. */
+  readonly running: boolean
+  readonly interval: number
+  readonly remaining: number
+  /** Elapsed fraction of the display interval, clamped to 0…1. */
+  readonly progress: number
+}
+
 export interface CarouselEventMap {
   'slide:beforeChange': [payload: { fromIndex: number; toIndex: number }]
   'slide:change': [payload: { index: number; prevIndex: number; slide: SlideData }]
@@ -119,6 +139,7 @@ export interface CarouselEventMap {
   'resize': [payload: { slidesPerView: number }]
   'autoplay:start': []
   'autoplay:stop': []
+  'autoplay:state': [payload: AutoplayState]
   'slide:lazyload': [payload: { index: number; element: HTMLElement }]
   'slide:error': [payload: { index: number; error: Error }]
   'destroy': []

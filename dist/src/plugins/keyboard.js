@@ -35,6 +35,9 @@ export function createKeyboard(options = {}) {
           const tag = element?.tagName
           if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element?.isContentEditable) return
           if (node === root) break
+          // A nested carousel owns its keys even when its orthogonal axis
+          // leaves a particular arrow key available for native page scrolling.
+          if (element?.classList?.contains?.('carousel')) return
         }
 
         // Document scope: only respond if focus is inside this carousel (or body/document)
@@ -43,23 +46,19 @@ export function createKeyboard(options = {}) {
           if (focused && focused !== ownerDocument.body && root && !root.contains(focused)) return
         }
 
-        switch (e.key) {
-          case 'ArrowLeft':
-            e.preventDefault()
-            context.prev()
-            break
-          case 'ArrowRight':
-            e.preventDefault()
-            context.next()
-            break
-          case 'Home':
-            e.preventDefault()
-            context.goTo(0)
-            break
-          case 'End':
-            e.preventDefault()
-            context.goTo(context.getSlideCount() - 1)
-            break
+        const vertical = context.options?.orientation === 'vertical'
+        if (e.key === (vertical ? 'ArrowUp' : 'ArrowLeft')) {
+          e.preventDefault()
+          context.prev()
+        } else if (e.key === (vertical ? 'ArrowDown' : 'ArrowRight')) {
+          e.preventDefault()
+          context.next()
+        } else if (e.key === 'Home') {
+          e.preventDefault()
+          context.goTo(0)
+        } else if (e.key === 'End') {
+          e.preventDefault()
+          context.goTo(context.getSlideCount() - 1)
         }
       }
 

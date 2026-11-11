@@ -45,6 +45,7 @@ export function createSwipe(options = {}) {
   let cachedN = 0
   let cachedPerView = 1
   let cachedPointerId = -1
+  let cachedVertical = false
 
   /** @type {((e: PointerEvent) => void) | null} */
   let onDown = null
@@ -64,6 +65,7 @@ export function createSwipe(options = {}) {
 
   function cancelDrag() {
     if (!dragging) return
+    suppressClick ||= trackMoved
     dragging = false
     trackMoved = false
     directionDecided = false
@@ -87,7 +89,17 @@ export function createSwipe(options = {}) {
         if (!enableMouse && e.pointerType === 'mouse') return
         if (e.button !== 0) return
         if (dragging || (e.pointerType === 'touch' && !e.isPrimary)) return
-        if (/** @type {HTMLElement} */ (e.target).closest('.carousel__arrow, .carousel__dot, .carousel__thumb')) return
+        // Controls and editors own their pointer gestures, including nodes
+        // exposed through an open shadow root's composed event path.
+        const path = e.composedPath?.() ?? []
+        for (const node of path.length ? path : [e.target]) {
+          const element = /** @type {HTMLElement} */ (node)
+          const tag = element?.tagName
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || element?.isContentEditable) return
+          if (element?.closest?.('.carousel__arrow, .carousel__dot, .carousel__thumb, .carousel__controls')) return
+          if (node === viewport) break
+          if (element?.classList?.contains?.('carousel')) return
+        }
         if (context.getSlideCount() === 0) return
 
         // Settle a deferred resize before capturing gesture coordinates.
@@ -106,6 +118,7 @@ export function createSwipe(options = {}) {
         cachedStep = context.getStep()
         cachedN = context.getSlideCount()
         cachedPerView = context.getSlidesPerView()
+        cachedVertical = context.options?.orientation === 'vertical'
 
       }
 
@@ -114,25 +127,27 @@ export function createSwipe(options = {}) {
 
         const dx = e.clientX - startX
         const dy = e.clientY - startY
+        const delta = cachedVertical ? dy : dx
+        const crossDelta = cachedVertical ? dx : dy
 
         // Dead zone: don't decide direction until 5px of movement
         if (!directionDecided) {
           if (Math.abs(dx) < DEAD_ZONE && Math.abs(dy) < DEAD_ZONE) return
           directionDecided = true
-          if (Math.abs(dy) > Math.abs(dx)) {
+          if (Math.abs(crossDelta) > Math.abs(delta)) {
             cancelDrag()
             context.snapBack(startIndex)
             return
           }
           // Capturing on pointerdown retargets an ordinary link/button click
-          // to the viewport. Take capture only after a horizontal drag starts.
+          // to the viewport. Take capture only after a carousel-axis drag starts.
           try { viewport?.setPointerCapture(e.pointerId) } catch { /* detached pointer */ }
         }
 
         trackMoved = true
         e.preventDefault()
 
-        let newPos = startPosition - dx
+        let newPos = startPosition - delta
 
         if (!cachedLoop) {
           const maxPos = Math.max(0, cachedN - cachedPerView) * cachedStep
@@ -159,9 +174,9 @@ export function createSwipe(options = {}) {
         }
         suppressClick = true
 
-        const dx = e.clientX - startX
+        const delta = cachedVertical ? e.clientY - startY : e.clientX - startX
 
-        if (Math.abs(dx) < threshold || cachedStep <= 0) {
+        if (Math.abs(delta) < threshold || cachedStep <= 0) {
           context.snapBack(startIndex)
           return
         }
@@ -169,7 +184,7 @@ export function createSwipe(options = {}) {
         const pos = context.getPosition()
         const engine = context.getLoopEngine()
         const perScroll = context.getSlidesPerScroll()
-        const direction = dx < 0 ? 1 : -1
+        const direction = delta < 0 ? 1 : -1
         let targetIdx
 
         if (perScroll > 1) {
@@ -214,7 +229,12 @@ export function createSwipe(options = {}) {
       eventWindow.addEventListener('pointercancel', onCancel, { signal })
 
       previousTouchAction = viewport.style.touchAction
-      viewport.style.touchAction = 'pan-y pinch-zoom'
+      const updateTouchAction = () => {
+        if (viewport) viewport.style.touchAction = context.options?.orientation === 'vertical'
+          ? 'pan-x pinch-zoom'
+          : 'pan-y pinch-zoom'
+      }
+      updateTouchAction()
       onDragStart = e => e.preventDefault()
       viewport.addEventListener('dragstart', onDragStart, { signal })
       onClick = e => {
@@ -225,7 +245,11 @@ export function createSwipe(options = {}) {
       }
       viewport.addEventListener('click', onClick, { capture: true, signal })
 
-      resizeUnsub = context.on('resize', cancelDrag)
+      resizeUnsub = context.on('resize', () => {
+        // A new geometry/axis invalidates all captured gesture coordinates.
+        cancelDrag()
+        updateTouchAction()
+      })
     },
 
     destroy() {

@@ -67,6 +67,7 @@ export function createArrows(options = {}) {
 
       prevBtn = document.createElement('button')
       prevBtn.className = 'carousel__arrow carousel__arrow--prev'
+      if (options.prevHTML === undefined) prevBtn.className += ' carousel__arrow--default-icon'
       prevBtn.type = 'button'
       prevBtn.setAttribute('aria-label', 'Previous slide')
       prevBtn.innerHTML = options.prevHTML ?? ARROW_SVG.prev
@@ -74,6 +75,7 @@ export function createArrows(options = {}) {
 
       nextBtn = document.createElement('button')
       nextBtn.className = 'carousel__arrow carousel__arrow--next'
+      if (options.nextHTML === undefined) nextBtn.className += ' carousel__arrow--default-icon'
       nextBtn.type = 'button'
       nextBtn.setAttribute('aria-label', 'Next slide')
       nextBtn.innerHTML = options.nextHTML ?? ARROW_SVG.next
