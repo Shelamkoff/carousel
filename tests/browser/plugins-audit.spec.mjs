@@ -142,12 +142,7 @@ for (const kind of ['input', 'textarea', 'contenteditable']) {
       ], { transitionDuration: 0, plugins: [createKeyboard()] })
       editor.focus()
       if (kind === 'contenteditable') {
-        const range = document.createRange()
-        range.setStart(editor.firstChild, 1)
-        range.collapse(true)
-        const selection = document.getSelection()
-        selection.removeAllRanges()
-        selection.addRange(range)
+        document.getSelection().setBaseAndExtent(editor.firstChild, 1, editor.firstChild, 1)
       } else {
         editor.setSelectionRange(1, 1)
       }
@@ -157,12 +152,15 @@ for (const kind of ['input', 'textarea', 'contenteditable']) {
       const editor = document.querySelector('#audit-shadow-component').shadowRoot.querySelector('#audit-shadow-editor')
       return {
         index: window.__shadowKeyboardCarousel.getIndex(),
-        caret: kind === 'contenteditable' ? document.getSelection().anchorOffset : editor.selectionStart,
+        text: kind === 'contenteditable' ? editor.textContent : editor.value,
       }
     }, kind)
-    expect(await readState()).toEqual({ index: 0, caret: 1 })
+    expect(await readState()).toEqual({ index: 0, text: 'abcd' })
     await page.keyboard.press('ArrowRight')
-    expect(await readState()).toEqual({ index: 0, caret: 2 })
+    // Document selection endpoints can be re-scoped outside the shadow tree.
+    // Native insertion verifies the actual caret position and editable focus.
+    await page.keyboard.insertText('X')
+    expect(await readState()).toEqual({ index: 0, text: 'abXcd' })
 
     await page.locator('#audit-shadow-control').focus()
     await page.keyboard.press('ArrowRight')
