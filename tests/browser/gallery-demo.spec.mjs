@@ -13,6 +13,9 @@ test('gallery controls toggle and inherit themes without remounting slide conten
     window.galleryNodes = [...document.querySelectorAll('#demo-gallery .carousel, #demo-gallery .carousel__slide, #demo-gallery .gallery-card')]
   })
   await page.getByLabel('Gallery theme', { exact: true }).selectOption('dark')
+  await gallery.locator('.carousel__play-pause').hover()
+  await expect(gallery.locator('.carousel__play-pause')).toHaveCSS('background-color', 'rgb(54, 67, 88)')
+  await page.getByLabel('Gallery theme', { exact: true }).hover()
   await expect(gallery.locator('.carousel__play-pause')).toHaveCSS('background-color', 'rgb(37, 45, 59)')
   await expect(gallery.locator('.carousel__progress-ring > .carousel__progress-value')).toHaveCSS('stroke', 'rgb(154, 186, 255)')
   await expect(gallery.locator('.carousel__counter')).toHaveCSS('color', 'rgb(240, 243, 249)')
