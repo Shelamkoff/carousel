@@ -11,7 +11,7 @@ Framework-agnostic, position-based carousel and slider with responsive layouts, 
 ## Highlights
 
 - Responsive single- and multi-slide layouts with fixed or automatic scroll steps.
-- Loop mode, cancellable transitions, keyboard control, touch and mouse gestures.
+- Loop mode, slide/fade and stairs/pixel/curtain transitions, keyboard control, touch and mouse gestures.
 - Arrows, dots, thumbnails, autoplay, lazy loading, swipe, and parallax plugins.
 - Framework-independent lifecycle, typed events, and TypeScript declarations.
 
@@ -101,7 +101,7 @@ interface SlideData {
 | `slidesPerView` | `number` | `1` | Number of visible slides. Positive values are required. |
 | `slidesPerScroll` | `number \| 'auto'` | `1` | Navigation step. `'auto'` uses the resolved visible count. |
 | `gap` | `number` | `0` | Gap between slides in CSS pixels. |
-| `transition` | `'slide' \| 'fade'` | `'slide'` | Movement strategy. Fade mode displays one slide at a time. |
+| `transition` | `CarouselTransition` | `'slide'` | Slide, fade, stairs, pixel or curtain. See transitions below. |
 | `transitionDuration` | `number` | `400` | Transition duration in milliseconds. |
 | `loop` | `boolean` | `false` | Circular navigation using positioned originals. In short loops only, inert visual replicas fill the viewport. |
 | `startIndex` | `number` | `0` | Initial logical slide index. Used only during construction. |
@@ -120,6 +120,35 @@ const carousel = new Carousel('#gallery', slides, {
     1024: { slidesPerView: 4, gap: 20 },
   },
 })
+```
+
+## Transitions
+
+| Value | Effect |
+| --- | --- |
+| `'slide'` | Move the track to the next position. |
+| `'fade'` | Cross-fade single-slide views; multi-slide views use track movement. |
+| `'stairs'` | Vertical panels cover the viewport and leave in a staggered cascade. |
+| `'pixel'` | A grid of tiles covers and reveals the viewport in a deterministic order. |
+| `'curtain'` | Two vertical halves close, then part horizontally. |
+
+The three reveal effects work across the whole viewport, including loop and multi-slide layouts. `transitionDuration` is the total time for both cover and reveal. The destination is shown when the panels fully cover the viewport. The panels are decorative: they do not clone slide contents or change form values and custom-element instances. All effects honor reduced motion.
+
+```js
+const carousel = new Carousel('#gallery', slides, {
+  transition: 'pixel',
+  transitionDuration: 800,
+})
+
+carousel.update({ transition: 'curtain' })
+```
+
+Set the reveal panel color with a CSS custom property on the carousel root:
+
+```css
+#gallery .carousel {
+  --carousel-transition-color: #17181b;
+}
 ```
 
 ## Public API
@@ -223,7 +252,7 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, fixed scroll steps, auto-height media, dynamic collections and lazy rendering. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, fixed scroll steps, auto-height media, dynamic collections, lazy rendering and all three reveal transitions. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
 
 To run the same demo locally:
 

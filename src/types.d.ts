@@ -9,7 +9,7 @@ export interface SlideData {
 
 /* ── Transition ── */
 
-export type CarouselTransition = 'slide' | 'fade'
+export type CarouselTransition = 'slide' | 'fade' | 'stairs' | 'pixel' | 'curtain'
 
 /* ── Plugin system ── */
 

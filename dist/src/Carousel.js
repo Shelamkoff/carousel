@@ -5,6 +5,7 @@ import { LoopEngine } from './LoopEngine.js'
 import { BreakpointManager } from './BreakpointManager.js'
 import { isHTMLElement } from './dom.js'
 import { getLastSlideIndex } from './navigation.js'
+import { ViewportTransition, isViewportTransition } from './transitions/ViewportTransition.js'
 
 const ownedPluginInstances = new WeakSet()
 
@@ -34,8 +35,8 @@ function validateResolvedOptions(options) {
   if (!Number.isFinite(options.transitionDuration) || options.transitionDuration < 0) {
     throw new RangeError('Carousel: transitionDuration must be a non-negative number')
   }
-  if (options.transition !== 'slide' && options.transition !== 'fade') {
-    throw new TypeError('Carousel: transition must be "slide" or "fade"')
+  if (options.transition !== 'slide' && options.transition !== 'fade' && !isViewportTransition(options.transition)) {
+    throw new TypeError('Carousel: transition must be "slide", "fade", "stairs", "pixel", or "curtain"')
   }
   if (!Number.isInteger(options.startIndex) || options.startIndex < 0) {
     throw new RangeError('Carousel: startIndex must be a non-negative integer')
@@ -123,6 +124,8 @@ export class Carousel {
   #fadeTimer = 0
   /** @type {boolean} */
   #fadeCancelled = false
+  /** @type {ViewportTransition | null} */
+  #viewportTransition = null
   #container = null
   #prevIndex = 0
   #pendingResize = false
@@ -208,6 +211,17 @@ export class Carousel {
 
     this.#trackRenderer.onResize((previousSlideWidth) => {
       const previousStep = previousSlideWidth + this.#trackRenderer.gap
+      if (this.#viewportTransition) {
+        // A responsive geometry change settles the pending destination and
+        // retires the decorative panels before publishing the resized state.
+        const targetIndex = this.#selectedIndex
+        this.#stopAllAnimations()
+        this.#pendingResize = true
+        this.#pendingResizeStep = previousStep
+        this.#position = targetIndex * previousStep
+        this.#onAnimationComplete()
+        return
+      }
       if (this.#animating) {
         this.#pendingResize = true
         this.#pendingResizeStep ??= previousStep
@@ -314,6 +328,8 @@ export class Carousel {
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
     if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
     this.#cancelFade()
+    this.#viewportTransition?.destroy()
+    this.#viewportTransition = null
     this.#trackRenderer.stopAnimation()
     this.#animating = false
   }
@@ -600,12 +616,47 @@ export class Carousel {
 
     const duration = this.#duration()
     this.#selectedIndex = index
-    if (this.#resolvedOptions.transition === 'fade' && (this.#resolvedOptions.slidesPerView ?? 1) <= 1) {
+    if (isViewportTransition(this.#resolvedOptions.transition)) {
+      this.#performViewportTransition(targetPos, duration)
+    } else if (this.#resolvedOptions.transition === 'fade' && (this.#resolvedOptions.slidesPerView ?? 1) <= 1) {
       this.#position = targetPos
       this.#performFade(previous, index, targetPos, duration)
     } else {
       this.#animateToPosition(targetPos, duration)
     }
+  }
+
+  /** Cover the complete viewport, commit the destination, then reveal it. */
+  #performViewportTransition(targetPos, duration) {
+    const viewport = this.#trackRenderer.getViewport()
+    if (duration <= 0 || !viewport) {
+      this.#position = targetPos
+      this.#render()
+      this.#onAnimationComplete()
+      return
+    }
+    const transition = new ViewportTransition(
+      viewport, this.#resolvedOptions.transition, targetPos < this.#position,
+    )
+    this.#viewportTransition = transition
+    let committed = false
+    this.#runAnimation(duration, progress => {
+      if (!committed && progress >= 0.5) {
+        transition.render(0.5)
+        this.#position = targetPos
+        this.#render()
+        committed = true
+        // Plugins such as parallax may have sampled the old position earlier
+        // in this frame. Reveal only after their next update; the final frame
+        // still completes immediately, including the background timer fallback.
+        if (progress < 1) return
+      }
+      transition.render(progress)
+    }, () => {
+      transition.destroy()
+      if (this.#viewportTransition === transition) this.#viewportTransition = null
+      this.#onAnimationComplete()
+    })
   }
 
   /**
@@ -746,37 +797,44 @@ export class Carousel {
    * @param {() => void} done
    */
   #runPositionAnimation(targetPos, duration, done) {
-    this.#animating = true
     const startPos = this.#position
-    if (duration <= 0 || Math.abs(targetPos - startPos) < 0.001) {
-      this.#position = targetPos
-      this.#render()
-      done()
-      return
-    }
-
-    const startTime = performance.now()
-    let settled = false
-    const finish = () => {
-      if (settled) return
-      settled = true
-      if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
-      if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
-        this.#position = targetPos
-      this.#render()
-      done()
-    }
-
-    this.#animationTimer = setTimeout(finish, duration + 60)
-    const frame = now => {
-      if (settled) return
-      const progress = Math.max(0, Math.min((now - startTime) / duration, 1))
+    const time = Math.abs(targetPos - startPos) < 0.001 ? 0 : duration
+    this.#runAnimation(time, progress => {
       const eased = 1 - Math.pow(1 - progress, 3)
       this.#position = startPos + (targetPos - startPos) * eased
       this.#render()
-      if (progress < 1) this.#rafId = requestAnimationFrame(frame)
-      else finish()
+    }, done)
+  }
+
+  /** One owned clock for positional and decorative transitions. */
+  #runAnimation(duration, render, done) {
+    this.#animating = true
+    const epoch = this.#navigationEpoch
+    const current = () => !this.#destroyed && this.#navigationEpoch === epoch
+    if (duration <= 0) {
+      render(1)
+      if (current()) done()
+      return
     }
+    const startTime = performance.now()
+    let settled = false
+    const finish = () => {
+      if (settled || !current()) return
+      settled = true
+      if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
+      if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
+      render(1)
+      if (current()) done()
+    }
+    const frame = now => {
+      this.#rafId = 0
+      if (settled || !current()) return
+      const progress = Math.max(0, Math.min((now - startTime) / duration, 1))
+      if (progress >= 1) { finish(); return }
+      render(progress)
+      if (current()) this.#rafId = requestAnimationFrame(frame)
+    }
+    this.#animationTimer = setTimeout(finish, duration + 60)
     this.#rafId = requestAnimationFrame(frame)
   }
 

@@ -9,6 +9,7 @@
   /* ── Transition ── */
   --carousel-transition-duration: 400ms;
   --carousel-transition-timing: ease;
+  --carousel-transition-color: #17181b;
 
   /* ── Arrows ── */
   --carousel-arrow-size: 40px;

@@ -850,3 +850,164 @@ test('a qualifying swipe after pending resize uses the rescaled gesture origin',
     carousel.destroy()
   }
 })
+
+for (const [transition, count] of [['stairs', 8], ['pixel', 64], ['curtain', 2]]) {
+  test(`${transition} commits a fractional loop destination only while the viewport is fully covered`, () => {
+    const { carousel, viewport } = mount(300, 5, {
+      loop: true, slidesPerView: 2.5, transition, transitionDuration: 200,
+    })
+    const events = []
+    carousel.on('transition:start', () => events.push('start'))
+    carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
+    carousel.on('slide:change', ({ index, prevIndex }) => events.push(`change:${prevIndex}:${index}`))
+    try {
+      carousel.goTo(3)
+      const overlay = viewport.querySelector('.carousel__transition')
+      assert.ok(overlay)
+      assert.equal(overlay.dataset.transition, transition)
+      assert.equal(overlay.children.length, count)
+      assert.equal(overlay.getAttribute('aria-hidden'), 'true')
+      assert.equal(overlay.inert, true)
+      assert.equal(overlay.style.pointerEvents, 'none')
+      assert.equal(carousel.getIndex(), 0)
+      frame(99)
+      assert.equal(carousel.getIndex(), 0)
+      frame(1)
+      assert.equal(carousel.getIndex(), 3)
+      for (const panel of overlay.children) {
+        assert.equal(panel.style.opacity, '1')
+        assert.equal(panel.style.transform, 'translate3d(0%, 0%, 0)')
+      }
+      assert.deepEqual(events, ['start'])
+      frame(100)
+      assert.equal(viewport.querySelector('.carousel__transition'), null)
+      assert.deepEqual(events, ['start', 'end:3', 'change:0:3'])
+    } finally {
+      carousel.destroy()
+    }
+  })
+
+  test(`${transition} has no decorative work at zero duration or with reduced motion`, () => {
+    const matchMedia = window.matchMedia
+    try {
+      for (const reduced of [false, true]) {
+        window.matchMedia = query => ({
+          matches: reduced && query.includes('prefers-reduced-motion'),
+          addEventListener() {}, removeEventListener() {},
+        })
+        const before = clock.frames.size
+        const { carousel, viewport } = mount(100, 4, {
+          transition, transitionDuration: reduced ? 500 : 0,
+        })
+        let completed = 0
+        carousel.on('transition:end', () => completed++)
+        carousel.goTo(2)
+        assert.equal(carousel.getIndex(), 2)
+        assert.equal(viewport.querySelector('.carousel__transition'), null)
+        assert.equal(completed, 1)
+        assert.equal(clock.frames.size, before)
+        carousel.destroy()
+      }
+    } finally {
+      window.matchMedia = matchMedia
+    }
+  })
+
+  test(`${transition} retires its timeline after update, destroy, or touch takeover`, () => {
+    for (const action of ['update', 'destroy', 'touch-before', 'touch-after']) {
+      const before = clock.frames.size
+      const { carousel, viewport } = mount(100, 5, {
+        transition, transitionDuration: 200, plugins: [createSwipe()],
+      })
+      let completed = 0
+      let changes = 0
+      carousel.on('transition:end', () => completed++)
+      carousel.on('slide:change', () => changes++)
+      carousel.goTo(3)
+      frame(action === 'touch-after' ? 120 : 50)
+      const visible = carousel.getIndex()
+      if (action === 'update') carousel.update({ gap: 3 })
+      else if (action === 'destroy') carousel.destroy()
+      else pointer(viewport, 'pointerup', 0)
+      assert.equal(viewport.querySelector('.carousel__transition'), null)
+      frame(300)
+      assert.equal(completed, 0)
+      assert.equal(changes, 0)
+      if (action !== 'destroy') assert.equal(carousel.getIndex(), visible)
+      carousel.destroy()
+      assert.equal(clock.frames.size, before)
+    }
+  })
+
+  test(`${transition} settles the intended partial page exactly once when its viewport resizes`, () => {
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    const { carousel, host, viewport } = mount(280, 5, {
+      slidesPerView: 2.8, transition, transitionDuration: 200, plugins: [probe],
+    })
+    const events = []
+    carousel.on('resize', () => events.push('resize'))
+    carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
+    carousel.on('slide:change', ({ index }) => events.push(`change:${index}`))
+    try {
+      carousel.goTo(3)
+      frame(50)
+      host.width = 560
+      ResizeObserver.flush()
+      frame(16)
+      assert.equal(viewport.querySelector('.carousel__transition'), null)
+      assert.equal(carousel.getIndex(), 3)
+      assert.ok(Math.abs(probe.ctx.getPosition() - 440) < 0.001)
+      assert.deepEqual(events, ['resize', 'end:3', 'change:3'])
+      frame(300)
+      assert.deepEqual(events, ['resize', 'end:3', 'change:3'])
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+for (const transition of ['stairs', 'pixel', 'curtain']) {
+  test(`${transition} keeps the commit frame covered until incoming parallax is synchronized`, () => {
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    const { carousel, viewport, track } = mount(100, 5, {
+      transition, transitionDuration: 200, plugins: [createParallax(), probe],
+    })
+    try {
+      const incoming = track.children[4].querySelector('.carousel__parallax__layer')
+      carousel.goTo(4)
+      frame(110)
+      assert.equal(probe.ctx.getPosition(), 400)
+      assert.equal(incoming.style.transform, 'translateX(-80%)')
+      const overlay = viewport.querySelector('.carousel__transition')
+      for (const panel of overlay.children) {
+        assert.equal(panel.style.transform, 'translate3d(0%, 0%, 0)')
+        assert.equal(panel.style.opacity, '1')
+      }
+      frame(16)
+      assert.equal(incoming.style.transform, 'translateX(0%)')
+      assert.ok(overlay.children.some(panel => panel.style.opacity !== '1'
+        || panel.style.transform !== 'translate3d(0%, 0%, 0)'))
+      frame(74)
+      assert.equal(viewport.querySelector('.carousel__transition'), null)
+      assert.equal(carousel.getIndex(), 4)
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+test('a decorative transition timer fallback synchronizes parallax without waiting for another frame', { timeout: 1000 }, async () => {
+  const { carousel, viewport, track } = mount(100, 5, {
+    transition: 'pixel', transitionDuration: 5, plugins: [createParallax()],
+  })
+  try {
+    const completed = new Promise(resolve => carousel.once('transition:end', resolve))
+    carousel.goTo(4)
+    await completed
+    assert.equal(carousel.getIndex(), 4)
+    assert.equal(viewport.querySelector('.carousel__transition'), null)
+    assert.equal(track.children[4].querySelector('.carousel__parallax__layer').style.transform, 'translateX(0%)')
+  } finally {
+    carousel.destroy()
+  }
+})
