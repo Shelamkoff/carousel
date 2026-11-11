@@ -508,20 +508,20 @@
     <h2>17. Fractional &amp; vertical gallery</h2>
     <p class="demo-note">Show part of the next slide with 1.15 or 2.25 slides per view. Switch direction, hide individual controls and try another theme. Vertical galleries use Up/Down keys and vertical dragging.</p>
     <div class="gallery-settings" role="group" aria-label="Gallery settings">
-      <label>Orientation
-        <select id="gallery-orientation"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select>
+      <label><span id="gallery-orientation-label">Orientation</span>
+        <select id="gallery-orientation" aria-labelledby="gallery-orientation-label"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select>
       </label>
-      <label>Slides per view
-        <select id="gallery-per-view"><option value="1">1</option><option value="1.15" selected>1.15</option><option value="2.25">2.25</option><option value="3">3</option></select>
+      <label><span id="gallery-per-view-label">Slides per view</span>
+        <select id="gallery-per-view" aria-labelledby="gallery-per-view-label"><option value="1">1</option><option value="1.15" selected>1.15</option><option value="2.25">2.25</option><option value="3">3</option></select>
       </label>
-      <label>Progress indicator
-        <select id="gallery-progress"><option value="circle">Circle</option><option value="bar">Bar</option><option value="off">Hidden</option></select>
+      <label><span id="gallery-progress-label">Progress indicator</span>
+        <select id="gallery-progress" aria-labelledby="gallery-progress-label"><option value="circle">Circle</option><option value="bar">Bar</option><option value="off">Hidden</option></select>
       </label>
-      <label>Controls position
-        <select id="gallery-controls-position"><option value="below">Below</option><option value="overlay">Overlay</option></select>
+      <label><span id="gallery-controls-position-label">Controls position</span>
+        <select id="gallery-controls-position" aria-labelledby="gallery-controls-position-label"><option value="below">Below</option><option value="overlay">Overlay</option></select>
       </label>
-      <label>Gallery theme
-        <select id="gallery-theme"><option value="light">Light</option><option value="dark">Dark</option><option value="compact">Compact</option></select>
+      <label><span id="gallery-theme-label">Gallery theme</span>
+        <select id="gallery-theme" aria-labelledby="gallery-theme-label"><option value="light">Light</option><option value="dark">Dark</option><option value="compact">Compact</option></select>
       </label>
       <label><input id="gallery-play-pause" type="checkbox" checked> Show Play/Pause</label>
       <label><input id="gallery-counter" type="checkbox" checked> Show slide counter</label>
