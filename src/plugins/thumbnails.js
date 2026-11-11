@@ -2,8 +2,8 @@
  * Thumbnails plugin — thumbnail strip for navigation.
  *
  * @param {object} [options]
- * @param {number} [options.width=60] — thumbnail width in px
- * @param {number} [options.height=40] — thumbnail height in px
+ * @param {number} [options.width=60] — fallback thumbnail width in px
+ * @param {number} [options.height=40] — fallback thumbnail height in px
  * @param {'bottom' | 'left' | 'right'} [options.position='bottom'] — strip position
  * @returns {import('../types').CarouselPlugin}
  */
@@ -36,8 +36,8 @@ export function createThumbnails(options = {}) {
       const thumb = document.createElement('button')
       thumb.className = 'carousel__thumb'
       thumb.type = 'button'
-      thumb.style.width = width + 'px'
-      thumb.style.height = height + 'px'
+      thumb.style.width = `var(--carousel-thumb-width, ${width}px)`
+      thumb.style.height = `var(--carousel-thumb-height, ${height}px)`
       thumb.setAttribute('aria-label', `Go to slide ${i + 1}`)
 
       const src = slides[i].thumb

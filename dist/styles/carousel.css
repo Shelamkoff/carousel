@@ -1,51 +1,6 @@
-/* ══════════════════════════════════════════
-   Carousel — CSS Custom Properties (Theming)
-   ══════════════════════════════════════════ */
-
-.carousel {
-  /* ── Layout ── */
-  --carousel-gap: 0px;
-
-  /* ── Transition ── */
-  --carousel-transition-duration: 400ms;
-  --carousel-transition-timing: ease;
-  --carousel-transition-color: #17181b;
-
-  /* ── Arrows ── */
-  --carousel-arrow-size: 40px;
-  --carousel-arrow-offset: 12px;
-  --carousel-arrow-bg: rgba(255, 255, 255, 0.9);
-  --carousel-arrow-bg-hover: #fff;
-  --carousel-arrow-color: #333;
-  --carousel-arrow-color-hover: #111;
-  --carousel-arrow-radius: 50%;
-  --carousel-arrow-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-  --carousel-arrow-shadow-hover: 0 4px 12px rgba(0, 0, 0, 0.2);
-
-  /* ── Dots ── */
-  --carousel-dots-gap: 8px;
-  --carousel-dots-padding: 12px 0;
-  --carousel-dot-size: 10px;
-  --carousel-dot-bg: rgba(0, 0, 0, 0.2);
-  --carousel-dot-bg-hover: rgba(0, 0, 0, 0.4);
-  --carousel-dot-bg-active: rgba(0, 0, 0, 0.7);
-  --carousel-dot-radius: 50%;
-  --carousel-dot-scale-active: 1.2;
-
-  /* ── Thumbnails ── */
-  --carousel-thumb-gap: 6px;
-  --carousel-thumb-padding: 8px 0;
-  --carousel-thumb-border-width: 2px;
-  --carousel-thumb-border-color: transparent;
-  --carousel-thumb-border-color-active: #333;
-  --carousel-thumb-radius: 4px;
-  --carousel-thumb-opacity: 0.6;
-  --carousel-thumb-opacity-hover: 0.9;
-  --carousel-thumb-opacity-active: 1;
-
-  /* ── Lazy load ── */
-  --carousel-lazy-fade-duration: 300ms;
-}
+/* Theme tokens inherit from the host or any ancestor. Keep defaults at each
+   use site so a generated .carousel never resets an application's theme.
+   Layout and navigation timing remain JavaScript options. */
 
 /* ── Core ── */
 
@@ -58,6 +13,7 @@
   position: relative;
   overflow: hidden;
   width: 100%;
+  border-radius: var(--carousel-radius, 0);
 }
 
 .carousel__track {
@@ -84,6 +40,22 @@
 
 /* ── Arrows ── */
 
+.carousel__arrow,
+.carousel__dot,
+.carousel__thumb {
+  font: inherit;
+  transition-duration: var(--carousel-control-duration, 200ms);
+  transition-timing-function: var(--carousel-control-timing, ease);
+}
+
+.carousel:focus-visible,
+.carousel__arrow:focus-visible,
+.carousel__dot:focus-visible,
+.carousel__thumb:focus-visible {
+  outline: var(--carousel-focus-width, 2px) solid var(--carousel-focus-color, currentColor);
+  outline-offset: var(--carousel-focus-offset, 3px);
+}
+
 .carousel__arrow {
   position: absolute;
   top: 50%;
@@ -93,22 +65,27 @@
   align-items: center;
   justify-content: center;
   box-sizing: border-box;
-  width: var(--carousel-arrow-size);
-  height: var(--carousel-arrow-size);
+  width: var(--carousel-arrow-size, 40px);
+  height: var(--carousel-arrow-size, 40px);
   padding: 0;
-  border: none;
-  border-radius: var(--carousel-arrow-radius);
-  background: var(--carousel-arrow-bg);
-  color: var(--carousel-arrow-color);
+  border: var(--carousel-arrow-border, none);
+  border-radius: var(--carousel-arrow-radius, 50%);
+  background: var(--carousel-arrow-bg, rgba(255, 255, 255, 0.9));
+  color: var(--carousel-arrow-color, #333);
   cursor: pointer;
-  box-shadow: var(--carousel-arrow-shadow);
-  transition: background 0.2s, opacity 0.2s, box-shadow 0.2s, color 0.2s;
+  box-shadow: var(--carousel-arrow-shadow, 0 2px 8px rgba(0, 0, 0, 0.15));
+  transition-property: background, opacity, box-shadow, color, border-color;
 }
 
 .carousel__arrow:hover {
-  background: var(--carousel-arrow-bg-hover);
-  color: var(--carousel-arrow-color-hover);
-  box-shadow: var(--carousel-arrow-shadow-hover);
+  background: var(--carousel-arrow-bg-hover, #fff);
+  color: var(--carousel-arrow-color-hover, #111);
+  box-shadow: var(--carousel-arrow-shadow-hover, 0 4px 12px rgba(0, 0, 0, 0.2));
+}
+
+.carousel__arrow-icon {
+  width: var(--carousel-arrow-icon-size, 24px);
+  height: var(--carousel-arrow-icon-size, 24px);
 }
 
 .carousel__arrow:active {
@@ -116,11 +93,11 @@
 }
 
 .carousel__arrow--prev {
-  left: var(--carousel-arrow-offset);
+  left: var(--carousel-arrow-offset, 12px);
 }
 
 .carousel__arrow--next {
-  right: var(--carousel-arrow-offset);
+  right: var(--carousel-arrow-offset, 12px);
 }
 
 /* ── Dots ── */
@@ -128,42 +105,53 @@
 .carousel__dots {
   display: flex;
   justify-content: center;
-  gap: var(--carousel-dots-gap);
-  padding: var(--carousel-dots-padding);
+  gap: var(--carousel-dots-gap, 8px);
+  padding: var(--carousel-dots-padding, 12px 0);
 }
 
 .carousel__dot {
-  width: var(--carousel-dot-size);
-  height: var(--carousel-dot-size);
+  box-sizing: border-box;
+  width: var(--carousel-dot-width, var(--carousel-dot-size, 10px));
+  height: var(--carousel-dot-height, var(--carousel-dot-size, 10px));
   padding: 0;
   border: none;
-  border-radius: var(--carousel-dot-radius);
-  background: var(--carousel-dot-bg);
+  border-radius: var(--carousel-dot-radius, 50%);
+  background: var(--carousel-dot-bg, rgba(0, 0, 0, 0.2));
   cursor: pointer;
-  transition: background 0.2s, transform 0.2s;
+  transition-property: background, transform;
 }
 
 .carousel__dot:hover {
-  background: var(--carousel-dot-bg-hover);
+  background: var(--carousel-dot-bg-hover, rgba(0, 0, 0, 0.4));
 }
 
 .carousel__dot--active {
-  background: var(--carousel-dot-bg-active);
-  transform: scale(var(--carousel-dot-scale-active));
+  background: var(--carousel-dot-bg-active, rgba(0, 0, 0, 0.7));
+  transform: scale(var(--carousel-dot-scale-active, 1.2));
 }
 
 /* ── Thumbnails ── */
 
 .carousel__thumbnails {
   display: flex;
-  gap: var(--carousel-thumb-gap);
+  gap: var(--carousel-thumb-gap, 6px);
   overflow-x: auto;
   scrollbar-width: thin;
 }
 
 .carousel__thumbnails--bottom {
-  padding: var(--carousel-thumb-padding);
-  justify-content: center;
+  padding: var(--carousel-thumb-padding, 8px 0);
+  justify-content: flex-start;
+}
+
+/* Auto margins center a short strip without pushing overflowing thumbnails
+   behind the scroll origin on narrow screens. */
+.carousel__thumbnails--bottom > .carousel__thumb:first-child {
+  margin-inline-start: auto;
+}
+
+.carousel__thumbnails--bottom > .carousel__thumb:last-child {
+  margin-inline-end: auto;
 }
 
 .carousel__thumbnails--left,
@@ -190,23 +178,24 @@
 
 .carousel__thumb {
   flex: 0 0 auto;
+  box-sizing: border-box;
   padding: 0;
-  border: var(--carousel-thumb-border-width) solid var(--carousel-thumb-border-color);
-  border-radius: var(--carousel-thumb-radius);
+  border: var(--carousel-thumb-border-width, 2px) solid var(--carousel-thumb-border-color, transparent);
+  border-radius: var(--carousel-thumb-radius, 4px);
   background: none;
   cursor: pointer;
   overflow: hidden;
-  transition: border-color 0.2s, opacity 0.2s;
-  opacity: var(--carousel-thumb-opacity);
+  transition-property: border-color, opacity;
+  opacity: var(--carousel-thumb-opacity, 0.6);
 }
 
 .carousel__thumb:hover {
-  opacity: var(--carousel-thumb-opacity-hover);
+  opacity: var(--carousel-thumb-opacity-hover, 0.9);
 }
 
 .carousel__thumb--active {
-  border-color: var(--carousel-thumb-border-color-active);
-  opacity: var(--carousel-thumb-opacity-active);
+  border-color: var(--carousel-thumb-border-color-active, #333);
+  opacity: var(--carousel-thumb-opacity-active, 1);
 }
 
 .carousel__thumb img {
@@ -235,14 +224,14 @@
 
 .carousel__parallax__layer > img {
   max-width: none;
-  flex: 0 0 calc(115% + (var(--carousel-gap) * 2));
+  flex: 0 0 calc(115% + (var(--carousel-gap, 0px) * 2));
   object-fit: cover;
 }
 
 /* ── Lazy loading ── */
 
 .carousel__slide--loaded {
-  animation: carousel-fade-in var(--carousel-lazy-fade-duration) ease;
+  animation: carousel-fade-in var(--carousel-lazy-fade-duration, 300ms) ease;
 }
 
 @keyframes carousel-fade-in {

@@ -143,13 +143,74 @@ const carousel = new Carousel('#gallery', slides, {
 carousel.update({ transition: 'curtain' })
 ```
 
-Set the reveal panel color with a CSS custom property on the carousel root:
+Set the reveal panel color with a CSS custom property on the host element:
 
 ```css
-#gallery .carousel {
+#gallery {
   --carousel-transition-color: #17181b;
 }
 ```
+
+## Theming
+
+Set `--carousel-*` properties on the element passed to `new Carousel()`, a theme wrapper, or `:root`. The generated carousel inherits them. Defaults are fallbacks at each use site, so a theme can be declared before or after the library stylesheet without `!important` or selectors tied to the internal markup.
+
+```css
+#gallery {
+  --carousel-radius: 12px;
+  --carousel-arrow-bg: #202733;
+  --carousel-arrow-bg-hover: #344258;
+  --carousel-arrow-color: #f4f7fc;
+  --carousel-arrow-color-hover: #fff;
+  --carousel-arrow-border: 1px solid #526078;
+  --carousel-arrow-radius: 8px;
+  --carousel-dot-bg: #66748a;
+  --carousel-dot-bg-hover: #c4d7ff;
+  --carousel-dot-bg-active: #9abaff;
+  --carousel-thumb-border-color-active: #9abaff;
+  --carousel-focus-color: #9abaff;
+  --carousel-transition-color: #202733;
+}
+
+@media (max-width: 480px) {
+  #gallery {
+    --carousel-arrow-size: 32px;
+    --carousel-arrow-icon-size: 18px;
+    --carousel-thumb-width: 48px;
+    --carousel-thumb-height: 32px;
+  }
+}
+```
+
+Changing a host class, data attribute, or custom property updates the theme immediately; no `carousel.update()` call is needed. Each host can have its own theme. Host styles also survive carousel rebuilds and destroy/remount cycles.
+
+### Theme properties
+
+All names below have the `--carousel-` prefix.
+
+| Properties | Defaults and purpose |
+| --- | --- |
+| `radius`, `transition-color` | Viewport clipping radius `0`; reveal panels `#17181b`. |
+| `arrow-size`, `arrow-icon-size`, `arrow-offset` | Button `40px`, built-in SVG `24px`, distance from the viewport edge `12px`. |
+| `arrow-bg`, `arrow-bg-hover` | `rgba(255, 255, 255, 0.9)` / `#fff`. |
+| `arrow-color`, `arrow-color-hover` | `#333` / `#111`; built-in icons use `currentColor`. |
+| `arrow-border`, `arrow-radius` | `none` / `50%`. |
+| `arrow-shadow`, `arrow-shadow-hover` | `0 2px 8px rgba(0, 0, 0, 0.15)` / `0 4px 12px rgba(0, 0, 0, 0.2)`. |
+| `dots-gap`, `dots-padding` | `8px` / `12px 0`. |
+| `dot-size`, `dot-width`, `dot-height` | Size `10px`; width and height fall back to size, allowing pill-shaped dots. |
+| `dot-bg`, `dot-bg-hover`, `dot-bg-active` | Black with opacity `0.2` / `0.4` / `0.7`. |
+| `dot-radius`, `dot-scale-active` | `50%` / `1.2`. |
+| `thumb-width`, `thumb-height` | Override the plugin's numeric `width` / `height` options (`60px` / `40px` by default). Dimensions include the border. |
+| `thumb-gap`, `thumb-padding` | `6px` / `8px 0`; padding applies to the bottom strip. |
+| `thumb-border-width`, `thumb-border-color`, `thumb-border-color-active` | `2px` / `transparent` / `#333`. |
+| `thumb-radius`, `thumb-opacity`, `thumb-opacity-hover`, `thumb-opacity-active` | `4px` / `0.6` / `0.9` / `1`. |
+| `focus-color`, `focus-width`, `focus-offset` | `currentColor` / `2px` / `3px`; keyboard focus on the region and controls. |
+| `control-duration`, `control-timing` | `200ms` / `ease`; visual state changes on arrows, dots and thumbnails. |
+| `lazy-fade-duration` | `300ms`; the lazy-content appearance animation. |
+
+For a complete custom design, style `.carousel__arrow`, `.carousel__dot` and `.carousel__thumb` with ordinary CSS after the library stylesheet. Selected dots and thumbnails expose `.carousel__dot--active`, `.carousel__thumb--active` and `aria-current="page"`; hover and keyboard focus use the usual pseudo-classes. Custom arrow HTML keeps its own dimensions; the icon-size token applies only to the built-in `.carousel__arrow-icon`. Slide contents are application-owned and can use your existing typography, backgrounds and spacing.
+
+Keep slide geometry in the JavaScript options: `gap`, `slidesPerView`, `slidesPerScroll` and `breakpoints`. Navigation duration is `transitionDuration`; `control-duration` only styles controls. `--carousel-gap` reflects the resolved JS gap for internal effects, and should not be used to change layout. The old, unused `--carousel-transition-duration` and `--carousel-transition-timing` declarations are no longer advertised. Avoid overriding positioning and transforms on the track and slide wrappers. All built-in decorative motion respects reduced motion.
 
 ## Public API
 

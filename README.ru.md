@@ -143,13 +143,74 @@ const carousel = new Carousel('#gallery', slides, {
 carousel.update({ transition: 'curtain' })
 ```
 
-Цвет панелей задаётся CSS-переменной на корневом элементе карусели:
+Цвет панелей задаётся CSS-переменной на контейнере карусели:
 
 ```css
-#gallery .carousel {
+#gallery {
   --carousel-transition-color: #17181b;
 }
 ```
+
+## Темизация
+
+Задавайте свойства `--carousel-*` на элементе, переданном в `new Carousel()`, на родительской обёртке темы или на `:root`. Созданная карусель наследует их. Значения по умолчанию подставляются в местах использования, поэтому тему можно объявлять до или после CSS библиотеки: `!important` и селекторы внутренней разметки не нужны.
+
+```css
+#gallery {
+  --carousel-radius: 12px;
+  --carousel-arrow-bg: #202733;
+  --carousel-arrow-bg-hover: #344258;
+  --carousel-arrow-color: #f4f7fc;
+  --carousel-arrow-color-hover: #fff;
+  --carousel-arrow-border: 1px solid #526078;
+  --carousel-arrow-radius: 8px;
+  --carousel-dot-bg: #66748a;
+  --carousel-dot-bg-hover: #c4d7ff;
+  --carousel-dot-bg-active: #9abaff;
+  --carousel-thumb-border-color-active: #9abaff;
+  --carousel-focus-color: #9abaff;
+  --carousel-transition-color: #202733;
+}
+
+@media (max-width: 480px) {
+  #gallery {
+    --carousel-arrow-size: 32px;
+    --carousel-arrow-icon-size: 18px;
+    --carousel-thumb-width: 48px;
+    --carousel-thumb-height: 32px;
+  }
+}
+```
+
+Изменение класса, data-атрибута или CSS-переменной контейнера сразу обновляет тему; вызывать `carousel.update()` не требуется. У каждой карусели может быть своя тема. Стили контейнера сохраняются при перестроении карусели и после destroy/remount.
+
+### Свойства темы
+
+Все имена в таблице имеют префикс `--carousel-`.
+
+| Свойства | Значения по умолчанию и назначение |
+| --- | --- |
+| `radius`, `transition-color` | Радиус обрезки видимой области `0`; цвет панелей перехода `#17181b`. |
+| `arrow-size`, `arrow-icon-size`, `arrow-offset` | Кнопка `40px`, встроенная SVG-иконка `24px`, отступ от края видимой области `12px`. |
+| `arrow-bg`, `arrow-bg-hover` | `rgba(255, 255, 255, 0.9)` / `#fff`. |
+| `arrow-color`, `arrow-color-hover` | `#333` / `#111`; встроенные иконки используют `currentColor`. |
+| `arrow-border`, `arrow-radius` | `none` / `50%`. |
+| `arrow-shadow`, `arrow-shadow-hover` | `0 2px 8px rgba(0, 0, 0, 0.15)` / `0 4px 12px rgba(0, 0, 0, 0.2)`. |
+| `dots-gap`, `dots-padding` | `8px` / `12px 0`. |
+| `dot-size`, `dot-width`, `dot-height` | Размер `10px`; ширина и высота по умолчанию равны размеру. Можно задавать вытянутую форму. |
+| `dot-bg`, `dot-bg-hover`, `dot-bg-active` | Чёрный с прозрачностью `0.2` / `0.4` / `0.7`. |
+| `dot-radius`, `dot-scale-active` | `50%` / `1.2`. |
+| `thumb-width`, `thumb-height` | Переопределяют числовые параметры плагина `width` / `height` (`60px` / `40px` по умолчанию). Размеры включают рамку. |
+| `thumb-gap`, `thumb-padding` | `6px` / `8px 0`; отступы применяются к нижней ленте. |
+| `thumb-border-width`, `thumb-border-color`, `thumb-border-color-active` | `2px` / `transparent` / `#333`. |
+| `thumb-radius`, `thumb-opacity`, `thumb-opacity-hover`, `thumb-opacity-active` | `4px` / `0.6` / `0.9` / `1`. |
+| `focus-color`, `focus-width`, `focus-offset` | `currentColor` / `2px` / `3px`; клавиатурный фокус на области карусели и элементах управления. |
+| `control-duration`, `control-timing` | `200ms` / `ease`; смена визуальных состояний стрелок, точек и миниатюр. |
+| `lazy-fade-duration` | `300ms`; анимация появления ленивого содержимого. |
+
+Для полностью собственного оформления используйте обычный CSS после стилей библиотеки: `.carousel__arrow`, `.carousel__dot` и `.carousel__thumb`. Выбранные точки и миниатюры имеют классы `.carousel__dot--active`, `.carousel__thumb--active` и `aria-current="page"`; наведение и клавиатурный фокус используют обычные псевдоклассы. Пользовательская HTML-разметка стрелок сохраняет свои размеры; переменная размера иконки применяется только к встроенной `.carousel__arrow-icon`. Содержимое слайдов принадлежит приложению и может использовать его типографику, фоны и отступы.
+
+Геометрию слайдов настраивайте через JavaScript: `gap`, `slidesPerView`, `slidesPerScroll` и `breakpoints`. Длительность навигации задаётся `transitionDuration`; `control-duration` относится только к элементам управления. `--carousel-gap` отражает вычисленный JS-отступ для внутренних эффектов и не предназначен для изменения раскладки. Старые неиспользуемые объявления `--carousel-transition-duration` и `--carousel-transition-timing` больше не предлагаются для настройки. Не переопределяйте позиционирование и transform трека и внешних обёрток слайдов. Все встроенные декоративные анимации учитывают уменьшение движения.
 
 ## Публичный API
 
