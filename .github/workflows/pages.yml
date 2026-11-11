@@ -1,0 +1,63 @@
+name: Demo on GitHub Pages
+
+on:
+  push:
+    # Keep this aligned with the repository's existing Pages source branch.
+    # deploy-pages also supports branch-based sites when invoked from that branch.
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: carousel-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Use Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
+
+      - name: Test and build
+        run: npm run check
+
+      - name: Verify committed distribution
+        run: git diff --exit-code -- dist demo-assets
+
+      - name: Stage the static demo
+        id: site
+        run: node scripts/build-pages.mjs
+
+      - name: Upload demo
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: ${{ steps.site.outputs.path }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy demo
+        id: deployment
+        uses: actions/deploy-pages@v5
