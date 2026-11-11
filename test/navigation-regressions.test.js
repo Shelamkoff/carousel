@@ -1107,3 +1107,249 @@ test('a pending shrink handler can update or destroy without publishing obsolete
     }
   }
 })
+
+for (const scenario of [
+  { name: 'finite navigation', loop: false, transition: 'slide', duration: 0 },
+  { name: 'loop navigation', loop: true, transition: 'slide', duration: 0 },
+  { name: 'decorative navigation', loop: false, transition: 'pixel', duration: 180 },
+]) {
+  test(`render-triggered ${scenario.name} waits for the rebuilt geometry`, async () => {
+    const host = new Element()
+    host.width = 100
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    let carousel
+    let calls = 0
+    const slides = [
+      { content: () => {
+        if (++calls === 2) carousel.goTo(1)
+        return new Element('article')
+      } },
+      ...Array.from({ length: 3 }, (_, index) => ({ content: String(index + 1) })),
+    ]
+    carousel = new Carousel(host, slides, {
+      loop: scenario.loop, transition: scenario.transition,
+      transitionDuration: scenario.duration, plugins: [probe],
+    })
+    const events = []
+    carousel.on('resize', () => events.push('resize'))
+    carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
+    carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
+    carousel.on('slide:change', ({ index, prevIndex }) => events.push(`change:${prevIndex}:${index}`))
+    try {
+      carousel.update({ slidesPerView: 2, gap: 10 })
+      const eventsAfterUpdate = [...events]
+      await Promise.resolve()
+      frame(200)
+      assert.equal(carousel.getIndex(), 1)
+      assert.equal(probe.ctx.getStep(), 55)
+      assert.equal(probe.ctx.getPosition(), 55)
+      assert.equal(calls, 2, 'deferred navigation must not rebuild slide content again')
+      assert.deepEqual(eventsAfterUpdate, ['resize'])
+      assert.deepEqual(events, ['resize', 'start:1', 'end:1', 'change:0:1'])
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+test('navigation from a render error waits for the rebuilt geometry', async () => {
+  const host = new Element()
+  host.width = 100
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  let calls = 0
+  const carousel = new Carousel(host, [
+    { content: () => {
+      if (++calls === 2) throw new Error('refresh failed')
+      return new Element('article')
+    } },
+    { content: 'Second' }, { content: 'Third' }, { content: 'Fourth' },
+  ], { transitionDuration: 0, plugins: [probe] })
+  const events = []
+  carousel.on('slide:error', () => { events.push('error'); carousel.goTo(1) })
+  carousel.on('resize', () => events.push('resize'))
+  carousel.on('slide:change', ({ index }) => events.push(`change:${index}`))
+  try {
+    carousel.update({ slidesPerView: 2 })
+    await Promise.resolve()
+    assert.equal(carousel.getIndex(), 1)
+    assert.equal(probe.ctx.getPosition(), 50)
+    assert.deepEqual(events, ['error', 'resize', 'change:1'])
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('nested rebuilds defer the last navigation request until the newest layout is ready', async () => {
+  const host = new Element()
+  host.width = 300
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  let carousel
+  let calls = 0
+  carousel = new Carousel(host, [
+    { content: () => {
+      if (++calls === 2) {
+        carousel.goTo(1)
+        carousel.update({ slidesPerView: 3, gap: 6 })
+      }
+      return new Element('article')
+    } },
+    ...Array.from({ length: 4 }, (_, index) => ({ content: String(index + 1) })),
+  ], { transitionDuration: 0, plugins: [probe] })
+  const events = []
+  carousel.on('resize', () => { events.push('resize'); carousel.goTo(2) })
+  carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
+  carousel.on('slide:change', ({ index }) => events.push(`change:${index}`))
+  try {
+    carousel.update({ slidesPerView: 2 })
+    await Promise.resolve()
+    assert.equal(carousel.getIndex(), 2)
+    assert.equal(probe.ctx.getStep(), 102)
+    assert.equal(probe.ctx.getPosition(), 204)
+    assert.equal(calls, 3)
+    assert.deepEqual(events, ['resize', 'start:2', 'change:2'])
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('destroy during a render callback cancels its queued navigation', async () => {
+  const host = new Element()
+  host.width = 100
+  let carousel
+  let calls = 0
+  carousel = new Carousel(host, [
+    { content: () => {
+      if (++calls === 2) {
+        carousel.goTo(1)
+        carousel.destroy()
+      }
+      return new Element('article')
+    } },
+    { content: 'Second' }, { content: 'Third' },
+  ], { transitionDuration: 0 })
+  const events = []
+  carousel.on('transition:start', () => events.push('start'))
+  carousel.on('slide:change', () => events.push('change'))
+  try {
+    carousel.update({ slidesPerView: 2 })
+    await Promise.resolve()
+    assert.equal(host.children.length, 0)
+    assert.deepEqual(events, [])
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('a rebuild inside beforeChange retains the outer navigation batch', async () => {
+  const { carousel } = mount(100, 4, { transitionDuration: 0 })
+  const events = []
+  carousel.on('slide:beforeChange', ({ toIndex }) => {
+    if (toIndex === 1) carousel.update({ slidesPerView: 2 })
+  })
+  carousel.on('slide:beforeChange', ({ toIndex }) => {
+    if (toIndex === 1) carousel.goTo(2)
+  })
+  carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
+  carousel.on('slide:change', ({ index }) => events.push(`change:${index}`))
+  try {
+    carousel.goTo(1)
+    assert.equal(carousel.getIndex(), 0)
+    assert.deepEqual(events, [])
+    await Promise.resolve()
+    assert.equal(carousel.getIndex(), 2)
+    assert.deepEqual(events, ['start:2', 'change:2'])
+  } finally {
+    carousel.destroy()
+  }
+})
+
+for (const target of [0, 2]) {
+  test(`a newer navigation to ${target} supersedes the request queued during a rebuild`, async () => {
+    const host = new Element()
+    host.width = 100
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    let carousel
+    let calls = 0
+    carousel = new Carousel(host, [
+      { content: () => {
+        if (++calls === 2) carousel.goTo(1)
+        return new Element('article')
+      } },
+      { content: 'Second' }, { content: 'Third' }, { content: 'Fourth' },
+    ], { transitionDuration: 0, plugins: [probe] })
+    const changes = []
+    carousel.on('slide:change', ({ index }) => changes.push(index))
+    try {
+      carousel.update({ slidesPerView: 2 })
+      carousel.goTo(target)
+      assert.equal(carousel.getIndex(), target)
+      await Promise.resolve()
+      assert.equal(carousel.getIndex(), target)
+      assert.equal(probe.ctx.getPosition(), target * probe.ctx.getStep())
+      assert.deepEqual(changes, target === 0 ? [] : [target])
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+for (const [action, target] of [['next', 4], ['prev', 2]]) {
+  test(`${action} from an inserted slide renderer uses the preserved current slide`, async () => {
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    const { carousel } = mount(100, 5, { startIndex: 2, transitionDuration: 0, plugins: [probe] })
+    const changes = []
+    carousel.on('slide:change', ({ index, prevIndex }) => changes.push({ index, prevIndex }))
+    try {
+      carousel.addSlide({ content: () => {
+        carousel[action]()
+        return new Element('article')
+      } }, 0)
+      assert.equal(carousel.getIndex(), 3)
+      await Promise.resolve()
+      assert.equal(carousel.getIndex(), target)
+      assert.equal(probe.ctx.getPosition(), target * probe.ctx.getStep())
+      assert.deepEqual(changes, [{ index: target, prevIndex: 3 }])
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+for (const [action, target, changes] of [['next', 3, [3]], ['prev', 1, [3, 1]]]) {
+  test(`${action} from beforeChange keeps its existing event-batch target semantics`, async () => {
+    const { carousel } = mount(100, 5, { startIndex: 2, transitionDuration: 0 })
+    const actual = []
+    carousel.on('slide:beforeChange', ({ toIndex }) => {
+      if (toIndex === 3) carousel[action]()
+    })
+    carousel.on('slide:change', ({ index }) => actual.push(index))
+    try {
+      carousel.goTo(3)
+      await Promise.resolve()
+      assert.equal(carousel.getIndex(), target)
+      assert.deepEqual(actual, changes)
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+test('resize callbacks resolve relative targets from their already normalized layout', async () => {
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(100, 5, { startIndex: 3, transitionDuration: 0, plugins: [probe] })
+  const changes = []
+  carousel.on('slide:change', ({ index }) => changes.push(index))
+  carousel.once('resize', () => {
+    carousel.prev()
+    carousel.update({ slidesPerView: 4 })
+  })
+  try {
+    carousel.update({ gap: 4 })
+    await Promise.resolve()
+    assert.equal(carousel.getIndex(), 1)
+    assert.equal(probe.ctx.getPosition(), probe.ctx.getStep())
+    assert.deepEqual(changes, [])
+  } finally {
+    carousel.destroy()
+  }
+})

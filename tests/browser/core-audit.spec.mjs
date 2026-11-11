@@ -160,3 +160,81 @@ for (const transition of ['slide', 'fade']) {
     expect(result.events).toEqual(['start:4', 'resize', 'end:4', 'change:0:4'])
   })
 }
+
+test('render navigation uses the rebuilt layout and yields to newer direct requests', async ({ page }) => {
+  const results = await page.evaluate(async () => {
+    const { Carousel } = await import('/src/index.js')
+    const results = []
+    for (const { loop, freshTarget, insertionAction } of [
+      { loop: false, freshTarget: null },
+      { loop: true, freshTarget: null },
+      { loop: false, freshTarget: 0 },
+      { loop: false, freshTarget: 2 },
+      { loop: false, freshTarget: null, insertionAction: 'next' },
+      { loop: false, freshTarget: null, insertionAction: 'prev' },
+    ]) {
+      const host = document.createElement('div')
+      host.style.width = '100px'
+      document.body.append(host)
+      let carousel, context
+      let calls = 0
+      carousel = new Carousel(host, [
+        { content: () => {
+          if (++calls === 2) carousel.goTo(1)
+          return document.createElement('article')
+        } },
+        ...Array.from({ length: insertionAction ? 4 : 3 }, (_, index) => ({ content: String(index + 1) })),
+      ], {
+        loop, startIndex: insertionAction ? 2 : 0, transitionDuration: 0,
+        plugins: [{ name: 'position-observer', install(ctx) { context = ctx } }],
+      })
+      const events = []
+      carousel.on('resize', () => events.push('resize'))
+      carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
+      carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
+      carousel.on('slide:change', ({ index }) => events.push(`change:${index}`))
+      try {
+        if (insertionAction) {
+          carousel.addSlide({ content: () => {
+            calls++
+            carousel[insertionAction]()
+            return document.createElement('article')
+          } }, 0)
+        } else carousel.update({ slidesPerView: 2, gap: 10 })
+        const eventsAfterRebuild = [...events]
+        if (freshTarget !== null) carousel.goTo(freshTarget)
+        await Promise.resolve()
+        const index = carousel.getIndex()
+        results.push({
+          index: carousel.getIndex(), position: context.getPosition(), step: context.getStep(),
+          offset: context.getSlideElement(index).getBoundingClientRect().left
+            - context.getViewport().getBoundingClientRect().left,
+          calls, events, eventsAfterRebuild,
+        })
+      } finally {
+        carousel.destroy()
+        host.remove()
+      }
+    }
+    return results
+  })
+  expect(results.map(({ index, position }) => ({ index, position }))).toEqual([
+    { index: 1, position: 55 }, { index: 1, position: 55 },
+    { index: 0, position: 0 }, { index: 2, position: 110 },
+    { index: 4, position: 400 }, { index: 2, position: 200 },
+  ])
+  expect(results.map(({ events }) => events)).toEqual([
+    ['resize', 'start:1', 'end:1', 'change:1'],
+    ['resize', 'start:1', 'end:1', 'change:1'],
+    ['resize'],
+    ['resize', 'start:2', 'end:2', 'change:2'],
+    ['resize', 'start:4', 'end:4', 'change:4'],
+    ['resize', 'start:2', 'end:2', 'change:2'],
+  ])
+  expect(results.map(({ step }) => step)).toEqual([55, 55, 55, 55, 100, 100])
+  for (const result of results) {
+    expect(result.offset).toBeCloseTo(0, 5)
+    expect(result.calls).toBe(2)
+    expect(result.eventsAfterRebuild).toEqual(['resize'])
+  }
+})

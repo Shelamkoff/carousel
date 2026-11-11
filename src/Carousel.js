@@ -136,6 +136,7 @@ export class Carousel {
   #navigationEpoch = 0
   #selectedIndex = 0
   #notifying = false
+  #rebuilding = false
   #queuedNavigation = null
 
   constructor(container, slides, options = {}) {
@@ -306,19 +307,22 @@ export class Carousel {
     const epoch = this.#navigationEpoch
     this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
     const opts = this.#resolvedOptions
-    this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
-      slidesPerView: opts.slidesPerView ?? 1,
-      gap: opts.gap ?? 0,
-      loop: opts.loop ?? false,
-      ariaLabel: opts.ariaLabel,
-    })
-    if (this.#destroyed || this.#navigationEpoch !== epoch) return
-    this.#initLoop()
-    this.#position = oldIdx * this.#step()
-    this.#selectedIndex = oldIdx
-    this.#render()
-    this.#selectedIndex = this.getIndex()
-    this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
+    this.#dispatchEvents(() => {
+      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
+        slidesPerView: opts.slidesPerView ?? 1,
+        gap: opts.gap ?? 0,
+        loop: opts.loop ?? false,
+        ariaLabel: opts.ariaLabel,
+      })
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
+      this.#initLoop()
+      this.#position = oldIdx * this.#step()
+      this.#selectedIndex = oldIdx
+      this.#render()
+      this.#selectedIndex = this.getIndex()
+      this.#rebuilding = false
+      this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
+    }, true)
   }
 
   /* ═══════════════ Animation ═══════════════ */
@@ -364,20 +368,31 @@ export class Carousel {
   }
 
   /**
-   * Prevent listener-driven navigation from recursively entering a transition.
-   * Defer the last requested navigation until the event batch is completed.
+   * Prevent callback-driven navigation from entering a transition before an
+   * event batch or layout rebuild is complete. Nested batches share one queue.
    * @param {() => void} dispatch
+   * @param {boolean} [rebuilding]
    */
-  #dispatchEvents(dispatch) {
+  #dispatchEvents(dispatch, rebuilding = false) {
+    const wasNotifying = this.#notifying
+    const wasRebuilding = this.#rebuilding
     this.#notifying = true
+    this.#rebuilding = wasRebuilding || rebuilding
     try {
       dispatch()
     } finally {
-      this.#notifying = false
-      const queued = this.#queuedNavigation
-      this.#queuedNavigation = null
-      if (queued && !this.#destroyed) {
-        queueMicrotask(() => this.#navigate(queued.index, queued.direction, queued.fromIndex, queued.startPosition))
+      this.#notifying = wasNotifying
+      this.#rebuilding = wasRebuilding
+      if (!wasNotifying) {
+        const queued = this.#queuedNavigation
+        if (queued && !this.#destroyed) {
+          queueMicrotask(() => {
+            if (this.#queuedNavigation !== queued) return
+            this.#queuedNavigation = null
+            if (queued.relativeDirection) this.#navigateRelative(queued.relativeDirection)
+            else this.#navigate(queued.index, queued.direction, queued.fromIndex, queued.startPosition)
+          })
+        }
       }
     }
   }
@@ -552,8 +567,20 @@ export class Carousel {
     return this.#loop && count > 0 ? step % count : step
   }
 
-  next() { this.#navigate(this.getIndex() + this.#navigationStep(), 1) }
-  prev() { this.#navigate(this.getIndex() - this.#navigationStep(), -1) }
+  /** @param {1 | -1} direction */
+  #navigateRelative(direction) {
+    if (this.#destroyed) return
+    // Insertion/removal can change the preserved slide's logical index before
+    // render callbacks run. Resolve relative targets after that rebuild settles.
+    if (this.#rebuilding) {
+      this.#queuedNavigation = { relativeDirection: direction }
+      return
+    }
+    this.#navigate(this.getIndex() + direction * this.#navigationStep(), direction)
+  }
+
+  next() { this.#navigateRelative(1) }
+  prev() { this.#navigateRelative(-1) }
 
   /** @param {number} index */
   goTo(index) { this.#navigate(index) }
@@ -579,6 +606,8 @@ export class Carousel {
       this.#queuedNavigation = { index, direction, fromIndex, startPosition }
       return
     }
+    // A newer direct request also supersedes queued work when it is a no-op.
+    this.#queuedNavigation = null
 
     const count = this.#slideManager.getSlideCount()
     if (count === 0) return
@@ -918,20 +947,23 @@ export class Carousel {
     this.#pendingResizeStep = null
     const opts = this.#resolvedOptions
     const epoch = this.#navigationEpoch
-    this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
-      slidesPerView: opts.slidesPerView ?? 1,
-      gap: opts.gap ?? 0,
-      loop: opts.loop ?? false,
-      ariaLabel: opts.ariaLabel,
-    }, refreshContent)
-    if (this.#destroyed || this.#navigationEpoch !== epoch) return
-    this.#initLoop()
-    const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
-    this.#position = Math.max(0, idx) * this.#step()
-    this.#selectedIndex = Math.max(0, idx)
-    this.#render()
-    this.#selectedIndex = this.getIndex()
-    this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
+    this.#dispatchEvents(() => {
+      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
+        slidesPerView: opts.slidesPerView ?? 1,
+        gap: opts.gap ?? 0,
+        loop: opts.loop ?? false,
+        ariaLabel: opts.ariaLabel,
+      }, refreshContent)
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
+      this.#initLoop()
+      const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
+      this.#position = Math.max(0, idx) * this.#step()
+      this.#selectedIndex = Math.max(0, idx)
+      this.#render()
+      this.#selectedIndex = this.getIndex()
+      this.#rebuilding = false
+      this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
+    }, true)
   }
 
   update(options) {
