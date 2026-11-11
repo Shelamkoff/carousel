@@ -12,6 +12,7 @@ const ARROW_SVG = {
  * @param {string} [options.prevHTML] — custom prev button markup
  * @param {string} [options.nextHTML] — custom next button markup
  * @param {boolean} [options.hideOnEdge=true] — hide at boundaries when not looping
+ * @param {boolean} [options.hideOnIdle=false] — slide arrows out until viewport hover or keyboard focus
  * @returns {import('../types').CarouselPlugin}
  */
 export function createArrows(options = {}) {
@@ -19,9 +20,12 @@ export function createArrows(options = {}) {
   let unsubs = []
   let prevBtn = null
   let nextBtn = null
+  let viewport = null
 
   const hideOnEdge = options.hideOnEdge ?? true
+  const hideOnIdle = options.hideOnIdle ?? false
   if (typeof hideOnEdge !== 'boolean') throw new TypeError('Carousel arrows hideOnEdge must be a boolean')
+  if (typeof hideOnIdle !== 'boolean') throw new TypeError('Carousel arrows hideOnIdle must be a boolean')
   if (options.prevHTML !== undefined && typeof options.prevHTML !== 'string') throw new TypeError('Carousel arrows prevHTML must be a string')
   if (options.nextHTML !== undefined && typeof options.nextHTML !== 'string') throw new TypeError('Carousel arrows nextHTML must be a string')
 
@@ -56,8 +60,9 @@ export function createArrows(options = {}) {
 
     install(context) {
       ctx = context
-      const viewport = context.getViewport()
+      viewport = context.getViewport()
       if (!viewport) return
+      if (hideOnIdle) viewport.classList.add('carousel__viewport--arrows-on-hover')
       const document = viewport.ownerDocument ?? globalThis.document
 
       prevBtn = document.createElement('button')
@@ -90,8 +95,10 @@ export function createArrows(options = {}) {
       unsubs = []
       prevBtn?.remove()
       nextBtn?.remove()
+      if (hideOnIdle) viewport?.classList.remove('carousel__viewport--arrows-on-hover')
       prevBtn = null
       nextBtn = null
+      viewport = null
       ctx = null
     },
   }

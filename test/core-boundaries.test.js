@@ -50,6 +50,8 @@ test('autoplay no-op does not mask the next user interaction', async () => {
 
 test('plugin factories reject coercive configuration', () => {
   assert.throws(() => createArrows({ hideOnEdge: 'yes' }), TypeError)
+  assert.throws(() => createArrows({ hideOnIdle: 'yes' }), TypeError)
+  assert.throws(() => createArrows({ hideOnIdle: 1 }), TypeError)
   assert.throws(() => createDots({ clickable: 1 }), TypeError)
   assert.throws(() => createSwipe({ mouse: 'yes' }), TypeError)
   assert.throws(() => createAutoplay({ pauseOnHover: 1 }), TypeError)

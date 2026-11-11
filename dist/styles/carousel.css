@@ -100,6 +100,37 @@
   right: var(--carousel-arrow-offset, 12px);
 }
 
+/* Keep controls visible for touch and mixed-input devices. Hover-only motion
+   uses the actual button width and themed offset, without layout measurements. */
+@media (hover: hover) and (pointer: fine) and (not (any-pointer: coarse)) {
+  .carousel__viewport--arrows-on-hover > .carousel__arrow {
+    transition-property: background, opacity, box-shadow, color, border-color, transform;
+  }
+
+  /* Reveal focused controls immediately so focus scrolling cannot chase an
+     arrow while it is still outside the clipped viewport. */
+  .carousel:focus-visible > .carousel__viewport--arrows-on-hover > .carousel__arrow,
+  .carousel__viewport--arrows-on-hover:has(:focus-visible) > .carousel__arrow {
+    transition: none;
+  }
+
+  /* Mouse focus must not keep arrows open after a click. Visible keyboard
+     focus on the region or viewport contents keeps both controls reachable.
+     Browsers without :has() ignore these rules and retain visible arrows. */
+  .carousel:not(:focus-visible) > .carousel__viewport--arrows-on-hover:not(:hover):not(:has(:focus-visible)) > .carousel__arrow {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .carousel:not(:focus-visible) > .carousel__viewport--arrows-on-hover:not(:hover):not(:has(:focus-visible)) > .carousel__arrow--prev {
+    transform: translate(calc(-100% - var(--carousel-arrow-offset, 12px)), -50%);
+  }
+
+  .carousel:not(:focus-visible) > .carousel__viewport--arrows-on-hover:not(:hover):not(:has(:focus-visible)) > .carousel__arrow--next {
+    transform: translate(calc(100% + var(--carousel-arrow-offset, 12px)), -50%);
+  }
+}
+
 /* ── Dots ── */
 
 .carousel__dots {

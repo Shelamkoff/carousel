@@ -254,7 +254,7 @@ Rendering and lazy-load failures are isolated to the affected slide. After const
 
 ## Built-in plugins
 
-- [Arrows](src/plugins/arrows/README.md) — previous and next buttons; edge hiding is enabled by default.
+- [Arrows](src/plugins/arrows/README.md) — previous and next buttons; edge hiding is enabled by default, hover reveal is opt-in.
 - [Dots](src/plugins/dots/README.md) — clickable pagination.
 - [Thumbnails](src/plugins/thumbnails/README.md) — bottom or side thumbnail navigation.
 - [Keyboard](src/plugins/keyboard/README.md) — focus-scoped arrow keys by default; document-wide handling is opt-in.
@@ -262,6 +262,8 @@ Rendering and lazy-load failures are isolated to the affected slide. After const
 - [Autoplay](src/plugins/autoplay/README.md) — interval playback with hover and interaction pausing.
 - [Lazy load](src/plugins/lazyload/README.md) — observer-based image loading and configurable preloading.
 - [Parallax](src/plugins/parallax/README.md) — position-driven visual offset.
+
+Use `createArrows({ hideOnIdle: true })` to slide arrows out towards their respective edges when the pointer leaves the slide viewport. Hover or visible keyboard focus reveals them again. Controls stay visible on touch and mixed-input devices; reduced motion is respected. The default is `false`. [Try the hover-reveal demo](https://shelamkoff.github.io/carousel/#hover-arrows-example).
 
 Install a plugin in `plugins` or with `use()` before destroying the carousel. A stateful plugin instance may belong to only one live carousel; create a fresh plugin object for every concurrent carousel.
 

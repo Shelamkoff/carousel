@@ -4,4 +4,5 @@ export function createArrows(options?: {
   prevHTML?: string
   nextHTML?: string
   hideOnEdge?: boolean
+  hideOnIdle?: boolean
 }): CarouselPlugin
