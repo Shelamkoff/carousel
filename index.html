@@ -362,13 +362,14 @@
       <button type="button" data-transition-choice="stairs" aria-pressed="true">Stairs</button>
       <button type="button" data-transition-choice="pixel" aria-pressed="false">Pixel</button>
       <button type="button" data-transition-choice="curtain" aria-pressed="false">Curtain</button>
-      <label class="transition-duration" for="transition-duration">Duration
+      <div class="transition-duration">
+        <label for="transition-duration">Duration</label>
         <select id="transition-duration">
           <option value="400">400 ms</option>
           <option value="800" selected>800 ms</option>
           <option value="1200">1200 ms</option>
         </select>
-      </label>
+      </div>
     </div>
     <output id="transition-status" class="demo-status" aria-live="polite"></output>
   </section>
