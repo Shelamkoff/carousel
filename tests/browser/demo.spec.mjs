@@ -53,3 +53,27 @@ test('auto-height responds to the demo controls and lazy content grows on naviga
   await expect(status).toHaveText('8 of 8 slides created')
   expect(errors).toEqual([])
 })
+
+test('the live demo previews all three reveal transitions', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/#transitions-example')
+  await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+  const presets = page.getByRole('group', { name: 'Slide transition presets' })
+  await expect(presets.getByRole('button')).toHaveCount(3)
+  const effects = ['stairs', 'pixel', 'curtain']
+  for (const [index, effect] of effects.entries()) {
+    const label = effect[0].toUpperCase() + effect.slice(1)
+    await presets.getByRole('button', { name: label, exact: true }).click()
+    await expect(presets.getByRole('button', { name: label, exact: true })).toHaveAttribute('aria-pressed', 'true')
+    const overlay = page.locator('#demo-transitions .carousel__transition')
+    await expect(overlay).toHaveAttribute('data-transition', effect)
+    await expect(overlay).toHaveCount(0)
+    await expect(page.locator('#transition-status')).toHaveText(`${label} · slide ${index + 2} of 6`)
+  }
+  await page.getByLabel('Duration', { exact: true }).selectOption('400')
+  await page.getByRole('region', { name: 'Reveal transitions example', exact: true })
+    .getByRole('button', { name: 'Next slide', exact: true }).click()
+  await expect(page.locator('#transition-status')).toHaveText('Curtain · slide 5 of 6')
+  expect(errors).toEqual([])
+})

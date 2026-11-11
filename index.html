@@ -62,7 +62,13 @@
     }
 
     .demo-controls button:disabled { cursor: default; opacity: .5; }
-    .demo-controls button:focus-visible, .demo-links a:focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
+    .demo-controls button:focus-visible, .demo-controls select:focus-visible, .demo-links a:focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
+    .demo-controls button[aria-pressed="true"] { background: #354791; color: #fff; border-color: #354791; }
+    .transition-duration { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
+    .transition-duration select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #333; font: inherit; }
+    .effect-figure { margin: 0; background: #fff; border-radius: 8px; overflow: hidden; }
+    .effect-figure img { display: block; width: 100%; height: auto; }
+    .effect-figure figcaption { padding: 12px 20px; line-height: 1.5; }
     .demo-note { color: #555; line-height: 1.5; margin-bottom: 16px; max-width: 65ch; }
     .demo-status { display: block; margin-top: 12px; color: #444; font-size: .875rem; line-height: 1.5; }
     .height-host { width: 100%; transition: width .25s ease; }
@@ -247,6 +253,7 @@
     <p class="demo-intro">Try the arrows, drag a slide, or focus the first carousel and use the arrow keys. Resize the page to explore responsive layouts.</p>
     <nav class="demo-links" aria-label="Demo navigation">
       <a href="#basic-example">Navigation</a>
+      <a href="#transitions-example">Transitions</a>
       <a href="#height-example">Auto-height</a>
       <a href="#dynamic-example">Dynamic slides</a>
       <a href="#lazy-example">Lazy loading</a>
@@ -345,6 +352,25 @@
     <p class="demo-note">A slide is created when it becomes visible or enters the one-slide preload range.</p>
     <div id="demo-lazy"></div>
     <output id="lazy-status" class="demo-status" aria-live="polite"></output>
+  </section>
+
+  <section class="demo-section" id="transitions-example">
+    <h2>14. Reveal transitions</h2>
+    <p class="demo-note">Choose an effect to preview it. Use the arrows or drag to switch slides.</p>
+    <div id="demo-transitions"></div>
+    <div class="demo-controls" role="group" aria-label="Slide transition presets">
+      <button type="button" data-transition-choice="stairs" aria-pressed="true">Stairs</button>
+      <button type="button" data-transition-choice="pixel" aria-pressed="false">Pixel</button>
+      <button type="button" data-transition-choice="curtain" aria-pressed="false">Curtain</button>
+      <label class="transition-duration" for="transition-duration">Duration
+        <select id="transition-duration">
+          <option value="400">400 ms</option>
+          <option value="800" selected>800 ms</option>
+          <option value="1200">1200 ms</option>
+        </select>
+      </label>
+    </div>
+    <output id="transition-status" class="demo-status" aria-live="polite"></output>
   </section>
 
   <script type="importmap">
@@ -729,6 +755,42 @@
       ariaLabel: 'Lazy content example',
       plugins: [createArrows(), createDots(), createLazyLoad({ preload: 1 })],
     })
+
+    // ── Demo 14: cover and reveal the full viewport ──
+    const transitionSlides = Array.from({ length: 6 }, (_, index) => ({
+      content: `<figure class="effect-figure"><img src="./demo-assets/panel-${index + 1}.svg" alt="Geometric panel ${index + 1}" width="800" height="400"><figcaption>Panel ${index + 1}</figcaption></figure>`,
+    }))
+    let activeTransition = 'stairs'
+    const transitionLabels = { stairs: 'Stairs', pixel: 'Pixel', curtain: 'Curtain' }
+    const transitionCarousel = new Carousel('#demo-transitions', transitionSlides, {
+      loop: true,
+      transition: activeTransition,
+      transitionDuration: 800,
+      ariaLabel: 'Reveal transitions example',
+      plugins: [createArrows(), createDots(), createKeyboard(), createSwipe({ mouse: true })],
+    })
+    const transitionStatus = document.getElementById('transition-status')
+    function updateTransitionStatus() {
+      transitionStatus.textContent = `${transitionLabels[activeTransition]} · slide ${transitionCarousel.getIndex() + 1} of ${transitionSlides.length}`
+    }
+    const transitionButtons = document.querySelectorAll('[data-transition-choice]')
+    for (const button of transitionButtons) {
+      button.addEventListener('click', () => {
+        activeTransition = button.dataset.transitionChoice
+        transitionCarousel.update({ transition: activeTransition })
+        for (const choice of transitionButtons) {
+          choice.setAttribute('aria-pressed', String(choice === button))
+        }
+        updateTransitionStatus()
+        transitionCarousel.next()
+      })
+    }
+    document.getElementById('transition-duration').addEventListener('change', event => {
+      transitionCarousel.update({ transitionDuration: Number(event.target.value) })
+      updateTransitionStatus()
+    })
+    transitionCarousel.on('slide:change', updateTransitionStatus)
+    updateTransitionStatus()
 
     document.body.dataset.status = 'pass'
   </script>
