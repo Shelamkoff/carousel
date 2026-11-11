@@ -6,5 +6,8 @@ const packageUrl = new URL(import.meta.resolve('@shelamkoff/event-bus/package.js
 const destination = new URL('../demo-assets/event-bus/', import.meta.url)
 await rm(destination, { recursive: true, force: true })
 await mkdir(destination, { recursive: true })
-await cp(new URL('dist/', packageUrl), destination, { recursive: true })
+await cp(new URL('dist/', packageUrl), destination, {
+  recursive: true,
+  filter: source => !source.endsWith('.d.ts'),
+})
 await cp(new URL('LICENSE', packageUrl), new URL('LICENSE', destination))

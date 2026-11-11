@@ -37,6 +37,8 @@ for (const loop of [false, true]) for (const mounted of [false, true]) {
       }))
       if (mounted) document.body.append(host)
       const carousel = new Carousel(host, figures.map(content => ({ content: () => content })), { loop, transitionDuration: 0 })
+      let invalidOptionsRejected = false
+      try { carousel.update([]) } catch (error) { invalidOptionsRejected = error instanceof TypeError }
       if (!mounted) document.body.append(host)
       const settle = async () => {
         for (let count = 0; count < 6; count++) await new Promise(requestAnimationFrame)
@@ -59,7 +61,7 @@ for (const loop of [false, true]) for (const mounted of [false, true]) {
       const grown = snapshot()
       carousel.destroy()
       await settle()
-      return { attached, resized, grown, childrenAfterDestroy: host.childElementCount, errors: window.resizeErrors }
+      return { attached, resized, grown, invalidOptionsRejected, childrenAfterDestroy: host.childElementCount, errors: window.resizeErrors }
     }, { mounted, loop })
     expect(result.attached.viewportWidth).toBe(640)
     expect(result.attached.slideWidths).toEqual([640, 640])
@@ -72,6 +74,7 @@ for (const loop of [false, true]) for (const mounted of [false, true]) {
     expect(result.grown.viewportHeight).toBe(Math.max(...result.grown.slideHeights))
     expect(result.grown.index).toBe(1)
     expect(result.childrenAfterDestroy).toBe(0)
+    expect(result.invalidOptionsRejected).toBe(true)
     expect(result.errors).toEqual([])
     expect(pageErrors).toEqual([])
   })
