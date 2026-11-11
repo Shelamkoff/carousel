@@ -8,7 +8,11 @@ import type {
   CarouselOptions,
 } from '../src/index.js'
 
-const presetNames: CarouselTransitionName[] = ['slide', 'fade', 'stairs', 'stairs-horizontal', 'pixel', 'curtain']
+const presetNames: CarouselTransitionName[] = [
+  'slide', 'fade', 'stairs', 'stairs-horizontal', 'pixel', 'curtain',
+  'diamond-wipe', 'directional-wipe', 'clock-wipe', 'aperture-wipe',
+  'polka-dots', 'grid-flip', 'doorway', 'water-drop',
+]
 const custom: CarouselTransitionDefinition = {
   name: 'application-wipe',
   create({ container, direction }: CarouselTransitionContext): CarouselTransitionInstance {

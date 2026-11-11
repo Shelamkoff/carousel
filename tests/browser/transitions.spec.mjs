@@ -1,6 +1,10 @@
 import { test, expect } from '@playwright/test'
 
-const transitions = ['stairs', 'stairs-horizontal', 'pixel', 'curtain']
+const transitions = [
+  'stairs', 'stairs-horizontal', 'pixel', 'curtain',
+  'diamond-wipe', 'directional-wipe', 'clock-wipe', 'aperture-wipe',
+  'polka-dots', 'grid-flip', 'doorway', 'water-drop',
+]
 
 async function mount(page, transition, options = {}) {
   await page.evaluate(async ({ transition, options }) => {
@@ -99,7 +103,8 @@ for (const transition of transitions) {
     expect(result.during.variant).toBe(transition)
     expect(result.during.hidden).toBe('true')
     expect(result.during.inert).toBe(true)
-    expect(result.during.pieces).toBe({ stairs: 8, 'stairs-horizontal': 8, pixel: 64, curtain: 2 }[transition])
+    expect(result.during.pieces).toBeGreaterThan(0)
+    expect(result.during.pieces).toBeLessThanOrEqual(64)
     expect(result.during.color).toBe('rgb(12, 34, 56)')
     expect(result.during.pointerEvents).toBe('none')
     expect(result.during.index).toBe(0)

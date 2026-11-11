@@ -1,3 +1,6 @@
+import { maskTransitionPresets } from './masks.js'
+import { depthTransitionPresets } from './depth.js'
+
 const clamp = value => Math.max(0, Math.min(value, 1))
 const ease = value => value < 0.5
   ? 4 * value * value * value
@@ -105,9 +108,11 @@ function createPanels(container, definition, direction) {
 
 // Built-ins use the same contract as application-defined effects. Adding one
 // does not add another branch to Carousel's navigation or animation controller.
-export const viewportTransitionPresets = Object.freeze(Object.fromEntries(
-  Object.entries(panels).map(([name, definition]) => [name, Object.freeze({
+export const viewportTransitionPresets = Object.freeze({
+  ...Object.fromEntries(Object.entries(panels).map(([name, definition]) => [name, Object.freeze({
     name,
     create: ({ container, direction }) => createPanels(container, definition, direction),
-  })]),
-))
+  })])),
+  ...maskTransitionPresets,
+  ...depthTransitionPresets,
+})

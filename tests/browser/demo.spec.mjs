@@ -60,10 +60,15 @@ test('the live demo previews built-in and application-defined reveal transitions
   await page.goto('/#transitions-example')
   await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
   const presets = page.getByRole('group', { name: 'Slide transition presets' })
-  await expect(presets.getByRole('button')).toHaveCount(5)
+  await expect(presets.getByRole('button')).toHaveCount(13)
+  await page.getByLabel('Duration', { exact: true }).selectOption('400')
   const effects = [
     ['stairs', 'Stairs'], ['stairs-horizontal', 'Horizontal stairs'],
-    ['pixel', 'Pixel'], ['curtain', 'Curtain'], ['custom-iris', 'Custom iris'],
+    ['pixel', 'Pixel'], ['curtain', 'Curtain'],
+    ['diamond-wipe', 'Diamond wipe'], ['directional-wipe', 'Directional wipe'],
+    ['clock-wipe', 'Clock wipe'], ['aperture-wipe', 'Aperture wipe'],
+    ['polka-dots', 'Polka dots'], ['grid-flip', 'Grid flip'],
+    ['doorway', 'Doorway'], ['water-drop', 'Water drop'], ['custom-iris', 'Custom iris'],
   ]
   for (const [index, [effect, label]] of effects.entries()) {
     await presets.getByRole('button', { name: label, exact: true }).click()
@@ -71,12 +76,28 @@ test('the live demo previews built-in and application-defined reveal transitions
     const overlay = page.locator('#demo-transitions .carousel__transition')
     await expect(overlay).toHaveAttribute('data-transition', effect)
     await expect(overlay).toHaveCount(0)
-    await expect(page.locator('#transition-status')).toHaveText(`${label} · slide ${index + 2} of 6`)
+    await expect(page.locator('#transition-status')).toHaveText(`${label} · slide ${(index + 1) % 6 + 1} of 6`)
+    await expect(page.getByRole('link', { name: 'Link to this effect' })).toHaveAttribute('href', `?transition=${effect}#transitions-example`)
   }
   await page.getByLabel('Duration', { exact: true }).selectOption('400')
   await page.getByRole('region', { name: 'Reveal transitions example', exact: true })
     .getByRole('button', { name: 'Next slide', exact: true }).click()
-  await expect(page.locator('#transition-status')).toHaveText('Custom iris · slide 1 of 6')
+  await expect(page.locator('#transition-status')).toHaveText('Custom iris · slide 3 of 6')
+  expect(errors).toEqual([])
+})
+
+test('a direct effect link selects a working preset and its cover color can be themed', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/?transition=water-drop#transitions-example')
+  await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+  await expect(page.getByRole('button', { name: 'Water drop', exact: true })).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.locator('#transition-status')).toHaveText('Water drop · slide 1 of 6')
+  await page.getByLabel('Cover color', { exact: true }).fill('#a24076')
+  await page.getByRole('region', { name: 'Reveal transitions example', exact: true })
+    .getByRole('button', { name: 'Next slide', exact: true }).click()
+  await expect(page.locator('#demo-transitions .carousel__transition-piece').first()).toHaveCSS('background-color', 'rgb(162, 64, 118)')
+  await expect(page.locator('#transition-status')).toHaveText('Water drop · slide 2 of 6')
   expect(errors).toEqual([])
 })
 

@@ -62,10 +62,15 @@
     }
 
     .demo-controls button:disabled { cursor: default; opacity: .5; }
-    .demo-controls button:focus-visible, .demo-controls select:focus-visible, .demo-links a:focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
+    .demo-controls button:focus-visible, .demo-controls select:focus-visible, .demo-controls input:focus-visible, .demo-links a:focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
     .demo-controls button[aria-pressed="true"] { background: #354791; color: #fff; border-color: #354791; }
     .transition-duration { display: flex; align-items: center; gap: 8px; font-size: .85rem; }
     .transition-duration select { padding: 6px 10px; border: 1px solid #ccc; border-radius: 4px; background: #fff; color: #333; font: inherit; }
+    .transition-duration input { width: 36px; height: 30px; padding: 2px; border: 1px solid #ccc; border-radius: 4px; background: #fff; cursor: pointer; }
+    .transition-options { align-items: center; gap: 16px; }
+    .transition-options a { color: #354791; text-underline-offset: 4px; font-size: .85rem; }
+    #transition-description { margin-top: 8px; }
+    #demo-transitions { --carousel-transition-color: #354791; }
     .effect-figure { margin: 0; background: #fff; border-radius: 8px; overflow: hidden; }
     .effect-figure img { display: block; width: 100%; height: auto; }
     .effect-figure figcaption { padding: 12px 20px; line-height: 1.5; }
@@ -425,7 +430,17 @@
       <button type="button" data-transition-choice="stairs-horizontal" aria-pressed="false">Horizontal stairs</button>
       <button type="button" data-transition-choice="pixel" aria-pressed="false">Pixel</button>
       <button type="button" data-transition-choice="curtain" aria-pressed="false">Curtain</button>
+      <button type="button" data-transition-choice="diamond-wipe" aria-pressed="false">Diamond wipe</button>
+      <button type="button" data-transition-choice="directional-wipe" aria-pressed="false">Directional wipe</button>
+      <button type="button" data-transition-choice="clock-wipe" aria-pressed="false">Clock wipe</button>
+      <button type="button" data-transition-choice="aperture-wipe" aria-pressed="false">Aperture wipe</button>
+      <button type="button" data-transition-choice="polka-dots" aria-pressed="false">Polka dots</button>
+      <button type="button" data-transition-choice="grid-flip" aria-pressed="false">Grid flip</button>
+      <button type="button" data-transition-choice="doorway" aria-pressed="false">Doorway</button>
+      <button type="button" data-transition-choice="water-drop" aria-pressed="false">Water drop</button>
       <button type="button" data-transition-choice="custom-iris" aria-pressed="false">Custom iris</button>
+    </div>
+    <div class="demo-controls transition-options">
       <div class="transition-duration">
         <label for="transition-duration">Duration</label>
         <select id="transition-duration">
@@ -434,9 +449,15 @@
           <option value="1200">1200 ms</option>
         </select>
       </div>
+      <div class="transition-duration">
+        <label for="transition-color">Cover color</label>
+        <input type="color" id="transition-color" value="#354791">
+      </div>
+      <a id="transition-link" href="?transition=stairs#transitions-example">Link to this effect</a>
     </div>
     <output id="transition-status" class="demo-status" aria-live="polite"></output>
-    <p class="demo-note">Horizontal stairs alternate left-to-right and right-to-left rows. Custom iris is defined in this demo through the public transition API.</p>
+    <p class="demo-note" id="transition-description"></p>
+    <p class="demo-note">All effects cover and reveal live slide content. Grid flip, Doorway and Water drop animate decorative panels and ripples. Custom iris demonstrates adding an effect through the public API.</p>
   </section>
 
   <section class="demo-section" id="theming-example">
@@ -845,10 +866,30 @@
     const transitionSlides = Array.from({ length: 6 }, (_, index) => ({
       content: `<figure class="effect-figure"><img src="./demo-assets/panel-${index + 1}.svg" alt="Geometric panel ${index + 1}" width="800" height="400"><figcaption>Panel ${index + 1}</figcaption></figure>`,
     }))
-    let activeTransition = 'stairs'
     const transitionLabels = {
       stairs: 'Stairs', 'stairs-horizontal': 'Horizontal stairs',
       pixel: 'Pixel', curtain: 'Curtain', 'custom-iris': 'Custom iris',
+      'diamond-wipe': 'Diamond wipe', 'directional-wipe': 'Directional wipe',
+      'clock-wipe': 'Clock wipe', 'aperture-wipe': 'Aperture wipe',
+      'polka-dots': 'Polka dots', 'grid-flip': 'Grid flip',
+      doorway: 'Doorway', 'water-drop': 'Water drop',
+    }
+    const requestedTransition = new URLSearchParams(location.search).get('transition')
+    let activeTransition = Object.hasOwn(transitionLabels, requestedTransition) ? requestedTransition : 'stairs'
+    const transitionDescriptions = {
+      stairs: 'Eight columns sweep upwards in sequence.',
+      'stairs-horizontal': 'Horizontal rows alternate left-to-right and right-to-left.',
+      pixel: 'A deterministic shuffle fades a grid of 64 tiles in and out.',
+      curtain: 'Two panels meet in the center and slide apart.',
+      'diamond-wipe': 'A diamond grows from the center, then recedes to reveal the next slide.',
+      'directional-wipe': 'A diagonal edge sweeps across the slide. Previous reverses its direction.',
+      'clock-wipe': 'A radial sector makes a full sweep around the center.',
+      'aperture-wipe': 'A rotating six-sided aperture closes and opens like a camera shutter.',
+      'polka-dots': 'A wave of growing circles covers the viewport from one corner.',
+      'grid-flip': 'Thirty-two tiles rotate in a diagonal wave.',
+      doorway: 'Two hinged panels close over the slide and open from the center.',
+      'water-drop': 'A circular wash expands with concentric ripples.',
+      'custom-iris': 'An application-defined circular mask uses the same animation clock as the built-in effects.',
     }
     // Application-owned effect: no registry, core edits or extra animation clock.
     const customIris = {
@@ -871,7 +912,7 @@
     }
     const transitionCarousel = new Carousel('#demo-transitions', transitionSlides, {
       loop: true,
-      transition: activeTransition,
+      transition: activeTransition === 'custom-iris' ? customIris : activeTransition,
       transitionDuration: 800,
       ariaLabel: 'Reveal transitions example',
       plugins: [createArrows(), createDots(), createKeyboard(), createSwipe({ mouse: true })],
@@ -879,9 +920,12 @@
     const transitionStatus = document.getElementById('transition-status')
     function updateTransitionStatus() {
       transitionStatus.textContent = `${transitionLabels[activeTransition]} · slide ${transitionCarousel.getIndex() + 1} of ${transitionSlides.length}`
+      document.getElementById('transition-description').textContent = transitionDescriptions[activeTransition]
+      document.getElementById('transition-link').href = `?transition=${activeTransition}#transitions-example`
     }
     const transitionButtons = document.querySelectorAll('[data-transition-choice]')
     for (const button of transitionButtons) {
+      button.setAttribute('aria-pressed', String(button.dataset.transitionChoice === activeTransition))
       button.addEventListener('click', () => {
         activeTransition = button.dataset.transitionChoice
         transitionCarousel.update({
@@ -891,12 +935,19 @@
           choice.setAttribute('aria-pressed', String(choice === button))
         }
         updateTransitionStatus()
+        const url = new URL(location.href)
+        url.searchParams.set('transition', activeTransition)
+        url.hash = 'transitions-example'
+        history.replaceState(null, '', url)
         transitionCarousel.next()
       })
     }
     document.getElementById('transition-duration').addEventListener('change', event => {
       transitionCarousel.update({ transitionDuration: Number(event.target.value) })
       updateTransitionStatus()
+    })
+    document.getElementById('transition-color').addEventListener('input', event => {
+      document.getElementById('demo-transitions').style.setProperty('--carousel-transition-color', event.target.value)
     })
     transitionCarousel.on('slide:change', updateTransitionStatus)
     updateTransitionStatus()

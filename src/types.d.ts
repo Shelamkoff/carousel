@@ -9,7 +9,10 @@ export interface SlideData {
 
 /* ── Transition ── */
 
-export type CarouselTransitionName = 'slide' | 'fade' | 'stairs' | 'stairs-horizontal' | 'pixel' | 'curtain'
+export type CarouselTransitionName =
+  | 'slide' | 'fade' | 'stairs' | 'stairs-horizontal' | 'pixel' | 'curtain'
+  | 'diamond-wipe' | 'directional-wipe' | 'clock-wipe' | 'aperture-wipe'
+  | 'polka-dots' | 'grid-flip' | 'doorway' | 'water-drop'
 
 export interface CarouselTransitionContext {
   /** Owned, inert overlay. Add decorative content here, without moving slides. */

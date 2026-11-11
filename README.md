@@ -11,7 +11,7 @@ Framework-agnostic, position-based carousel and slider with responsive layouts, 
 ## Highlights
 
 - Responsive single- and multi-slide layouts with fixed or automatic scroll steps.
-- Loop mode, slide/fade and stairs/horizontal stairs/pixel/curtain transitions, custom effects, keyboard control, touch and mouse gestures.
+- Loop mode, 14 built-in transitions, custom effects, keyboard control, touch and mouse gestures.
 - Arrows, dots, thumbnails, autoplay, lazy loading, swipe, and parallax plugins.
 - Framework-independent lifecycle, typed events, and TypeScript declarations.
 
@@ -132,8 +132,20 @@ const carousel = new Carousel('#gallery', slides, {
 | `'stairs-horizontal'` | Eight horizontal rows sweep in alternating directions: left to right, then right to left. Backward navigation reverses the row stagger. |
 | `'pixel'` | A grid of tiles covers and reveals the viewport in a deterministic order. |
 | `'curtain'` | Two vertical halves close, then part horizontally. |
+| `'diamond-wipe'` | A centered diamond expands to cover the viewport, then contracts. |
+| `'directional-wipe'` | A diagonal edge crosses the viewport; backward navigation mirrors the sweep. |
+| `'clock-wipe'` | A radial sector sweeps around the center; backward navigation reverses the rotation. |
+| `'aperture-wipe'` | A rotating six-sided camera aperture closes and opens. |
+| `'polka-dots'` | A wave of growing circles spreads from a corner; the grid adapts to the viewport. |
+| `'grid-flip'` | 32 decorative tiles rotate in a staggered diagonal wave. |
+| `'doorway'` | Two hinged decorative panels close and open with perspective. |
+| `'water-drop'` | A circular wash with concentric ripples covers and reveals the slide. |
 
 The reveal effects work across the whole viewport, including loop and multi-slide layouts. `transitionDuration` is the total time for both cover and reveal. The destination is shown when the panels fully cover the viewport. The panels are decorative: they do not clone slide contents or change form values and custom-element instances. All effects honor reduced motion.
+
+The eight additional presets are native CSS interpretations of transition patterns. Grid flip and Doorway animate theme-colored panels; Water drop animates a circular cover and ripples. They do not distort photo textures or require WebGL, canvas snapshots, external image URLs, or additional dependencies. They also work with forms, video and arbitrary HTML. Each effect uses at most 64 decorative elements, measures geometry only when created, and shares the carousel's animation clock and cleanup lifecycle.
+
+[Preview every effect in the live demo](https://shelamkoff.github.io/carousel/#transitions-example). Choose a preset to play it, adjust its duration and cover color, or use **Link to this effect** to share the selection.
 
 ```js
 const carousel = new Carousel('#gallery', slides, {
@@ -149,6 +161,7 @@ Set the reveal panel color with a CSS custom property on the host element:
 ```css
 #gallery {
   --carousel-transition-color: #17181b;
+  --carousel-transition-highlight: rgba(255, 255, 255, 0.18);
 }
 ```
 
@@ -228,6 +241,7 @@ All names below have the `--carousel-` prefix.
 | Properties | Defaults and purpose |
 | --- | --- |
 | `radius`, `transition-color` | Viewport clipping radius `0`; reveal panels `#17181b`. |
+| `transition-highlight` | `rgba(255, 255, 255, 0.18)`; aperture blades, tile edges, doorway lighting and ripples. |
 | `arrow-size`, `arrow-icon-size`, `arrow-offset` | Button `40px`, built-in SVG `24px`, distance from the viewport edge `12px`. |
 | `arrow-bg`, `arrow-bg-hover` | `rgba(255, 255, 255, 0.9)` / `#fff`. |
 | `arrow-color`, `arrow-color-hover` | `#333` / `#111`; built-in icons use `currentColor`. |
@@ -353,7 +367,9 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, horizontal stairs and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, hover-reveal arrows, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, all 12 cover transitions and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
+
+GitHub Pages is published by `.github/workflows/pages.yml` on pushes to `master`, the configured Pages source branch. The workflow tests and builds the project, then stages only `index.html`, runtime JavaScript, CSS and demo assets through `scripts/build-pages.mjs`. It deploys a static artifact without Jekyll. `/version.json` records the deployed commit SHA. Generated staging directories live outside the repository.
 
 To run the same demo locally:
 
