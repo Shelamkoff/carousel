@@ -87,7 +87,8 @@ export function createDots(options = {}) {
   }
 
   function updateActive() {
-    if (ctx?.isLoop() && !getTargets().includes(ctx.getIndex())) {
+    // An empty loop has no page to reanchor to.
+    if (ctx?.isLoop() && ctx.getSlideCount() > 0 && !getTargets().includes(ctx.getIndex())) {
       loopAnchor = ctx.getIndex()
       buildDots()
       return

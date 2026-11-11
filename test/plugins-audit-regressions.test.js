@@ -288,6 +288,96 @@ test('retained pagination buttons remain inert after destroy and plugin reuse', 
   }
 })
 
+test('empty looping pagination installs without inventing a page or recursing', () => {
+  const originalDocument = globalThis.document
+  globalThis.document = { createElement: element }
+  const plugin = createDots()
+  const root = element()
+  const context = navigationContext(root, {
+    getSlideCount: () => 0,
+    isLoop: () => true,
+  })
+  try {
+    assert.doesNotThrow(() => plugin.install(context))
+    assert.equal(root.children[0].children.length, 0)
+    assert.doesNotThrow(() => context.emit('slide:change'))
+    assert.doesNotThrow(() => context.emit('resize'))
+    assert.equal(root.children[0].children.length, 0)
+  } finally {
+    plugin.destroy()
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+  }
+})
+
+test('loop pagination survives removal of the last slide, repopulation and plugin reuse', () => {
+  const originalDocument = globalThis.document
+  globalThis.document = { createElement: element }
+  const plugin = createDots()
+  const root = element()
+  let count = 1
+  let index = 0
+  const navigations = []
+  const context = navigationContext(root, {
+    getSlideCount: () => count,
+    getIndex: () => index,
+    getSlidesPerScroll: () => 2,
+    isLoop: () => true,
+    goTo(target) { navigations.push(target) },
+  })
+  try {
+    plugin.install(context)
+    const container = root.children[0]
+    const retired = container.children[0]
+    assert.equal(container.children.length, 1)
+
+    count = 0
+    assert.doesNotThrow(() => context.emit('resize'))
+    assert.equal(container.children.length, 0)
+    retired.click()
+    assert.deepEqual(navigations, [], 'a removed page must no longer navigate')
+
+    // Rebuilding a non-empty loop still reanchors to the selected residue
+    // class: with step 2 and four slides, index 1 exposes pages 1 and 3.
+    count = 4
+    index = 1
+    context.emit('resize')
+    assert.equal(container.children.length, 2)
+    assert.equal(container.children[0].getAttribute('aria-current'), 'page')
+    container.children.forEach(button => button.click())
+    assert.deepEqual(navigations, [1, 3])
+
+    index = 0
+    context.emit('slide:change')
+    container.children.forEach(button => button.click())
+    assert.deepEqual(navigations, [1, 3, 0, 2])
+    const previousOwnerButton = container.children[1]
+    plugin.destroy()
+
+    const nextRoot = element()
+    let nextCount = 0
+    let nextNavigations = 0
+    const nextContext = navigationContext(nextRoot, {
+      getSlideCount: () => nextCount,
+      isLoop: () => true,
+      goTo() { nextNavigations++ },
+    })
+    assert.doesNotThrow(() => plugin.install(nextContext))
+    assert.equal(nextRoot.children[0].children.length, 0)
+    nextCount = 2
+    nextContext.emit('resize')
+    assert.equal(nextRoot.children[0].children.length, 2)
+    previousOwnerButton.click()
+    assert.equal(nextNavigations, 0)
+    nextRoot.children[0].children[1].click()
+    assert.equal(nextNavigations, 1)
+  } finally {
+    plugin.destroy()
+    if (originalDocument === undefined) delete globalThis.document
+    else globalThis.document = originalDocument
+  }
+})
+
 test('pagination and arrows never expose a nonexistent slide when slidesPerView is below one', () => {
   const originalDocument = globalThis.document
   globalThis.document = { createElement: element }
