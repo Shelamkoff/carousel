@@ -54,10 +54,10 @@ export function createLazyLoad(options = {}) {
     context.emit('slide:lazyload', { index: idx, element: el })
   }
 
-  function preloadAdjacent() {
+  function preloadAdjacent(targetIndex = null, includeVisible = false) {
     const context = ctx
     if (!context) return
-    const idx = context.getIndex()
+    const idx = targetIndex ?? context.getIndex()
     const count = context.getSlideCount()
     if (count === 0) return
 
@@ -65,8 +65,13 @@ export function createLazyLoad(options = {}) {
     // Clamp before iterating, including for integers above Number.MAX_SAFE_INTEGER.
     const loop = context.isLoop()
     const radius = Math.min(preloadCount, count - 1)
-    const first = loop ? idx - radius : Math.max(0, idx - radius)
-    const last = Math.min(idx + radius, loop ? first + count - 1 : count - 1)
+    const perView = includeVisible ? context.getSlidesPerView() : 1
+    // The last finite page can begin before its logical target index when
+    // slidesPerView is fractional. Include that partially visible first slide.
+    const firstVisible = loop ? idx : Math.floor(Math.min(idx, Math.max(0, count - perView)))
+    const visibleCount = Math.min(count, Math.ceil(perView))
+    const first = loop ? firstVisible - radius : Math.max(0, firstVisible - radius)
+    const last = Math.min(firstVisible + visibleCount - 1 + radius, loop ? first + count - 1 : count - 1)
     for (let position = first; position <= last; position++) {
       if (ctx !== context) return
       const i = loop ? ((position % count) + count) % count : position
@@ -118,7 +123,9 @@ export function createLazyLoad(options = {}) {
       preloadAdjacent()
 
       unsubs.push(
-        context.on('slide:change', preloadAdjacent),
+        // Effects and distant jumps must start with rendered target content.
+        context.on('slide:beforeChange', ({ toIndex }) => preloadAdjacent(toIndex, true)),
+        context.on('slide:change', () => preloadAdjacent()),
         context.on('resize', () => {
           observer?.disconnect()
           observeLazySlides()

@@ -219,6 +219,52 @@ test('cancelled lazy rendering does not overwrite a newer successful render', ()
   }
 })
 
+for (const { name, count, toIndex, slidesPerView, loop, preload, expected } of [
+  { name: 'fractional final page', count: 6, toIndex: 4, slidesPerView: 2.5, loop: false, preload: 0, expected: [0, 3, 4, 5] },
+  { name: 'wrapped fractional page', count: 5, toIndex: 4, slidesPerView: 2.5, loop: true, preload: 0, expected: [0, 1, 4] },
+  { name: 'page with adjacent preload', count: 8, toIndex: 5, slidesPerView: 2.5, loop: false, preload: 1, expected: [0, 1, 4, 5, 6, 7] },
+]) {
+  test(`lazy loading prepares the destination before transition start: ${name}`, () => {
+    const originalObserver = globalThis.IntersectionObserver
+    globalThis.IntersectionObserver = class {
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    }
+    const elements = Array.from({ length: count }, (_, index) => ({
+      dataset: { index: String(index) }, classList: { add() {} },
+    }))
+    const loaded = []
+    const plugin = createLazyLoad({ preload })
+    const context = eventContext({
+      getViewport: () => ({}),
+      getSlideCount: () => count,
+      getSlidesPerView: () => slidesPerView,
+      getIndex: () => 0,
+      isLoop: () => loop,
+      getSlideElements: () => elements,
+      getSlides: () => elements.map(() => ({ lazy: true })),
+      getSlide: () => ({ lazy: true }),
+      getSlideElement: index => elements[index],
+      renderSlide(index) {
+        loaded.push(index)
+        elements[index].dataset.rendered = 'true'
+        return true
+      },
+    })
+    try {
+      plugin.install(context)
+      context.emit('slide:beforeChange', { fromIndex: 0, toIndex })
+      assert.deepEqual(loaded.sort((a, b) => a - b), expected)
+      assert.equal(elements[toIndex].dataset.loaded, 'true')
+    } finally {
+      plugin.destroy()
+      if (originalObserver === undefined) delete globalThis.IntersectionObserver
+      else globalThis.IntersectionObserver = originalObserver
+    }
+  })
+}
+
 test('retained pagination buttons remain inert after destroy and plugin reuse', () => {
   const originalDocument = globalThis.document
   globalThis.document = { createElement: element }

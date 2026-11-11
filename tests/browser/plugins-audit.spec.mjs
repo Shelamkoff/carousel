@@ -140,3 +140,79 @@ test('lazy loading preserves the newest successful render after a nested update'
   })
   expect(result).toEqual({ sameElement: true, rendered: 'true', loaded: 'true', text: 'Render 3' })
 })
+
+test('fade prepares a distant lazy destination and parallax layer before transition start', async ({ page }) => {
+  await page.goto('/tests/browser/lifecycle.html')
+  await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+  const result = await page.evaluate(async () => {
+    const { Carousel, createLazyLoad, createParallax } = await import('/src/index.js')
+    const host = document.createElement('div')
+    host.style.width = '400px'
+    document.body.appendChild(host)
+    const carousel = new Carousel(host, Array.from({ length: 5 }, (_, index) => ({
+      lazy: true,
+      content: () => {
+        const node = document.createElement('article')
+        node.textContent = `Slide ${index + 1}`
+        return node
+      },
+    })), {
+      transition: 'fade', transitionDuration: 200,
+      plugins: [createLazyLoad({ preload: 0 }), createParallax()],
+    })
+    let snapshot
+    carousel.on('transition:start', () => {
+      const target = host.querySelector('[data-index="4"]')
+      snapshot = {
+        loaded: target.dataset.loaded,
+        text: target.textContent,
+        hasLayer: !!target.querySelector('.carousel__parallax__layer'),
+      }
+    })
+    carousel.goTo(4)
+    carousel.destroy()
+    host.remove()
+    return snapshot
+  })
+  expect(result).toEqual({ loaded: 'true', text: 'Slide 5', hasLayer: true })
+})
+
+for (const action of ['update', 'destroy']) {
+  test(`lazy destination ${action} cancels stale navigation before a transition starts`, async ({ page }) => {
+    const errors = []
+    page.on('pageerror', error => errors.push(error.message))
+    await page.goto('/tests/browser/lifecycle.html')
+    await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+    const result = await page.evaluate(async action => {
+      const { Carousel, createLazyLoad } = await import('/src/index.js')
+      const host = document.createElement('div')
+      host.style.width = '400px'
+      document.body.appendChild(host)
+      let carousel
+      let changed = false
+      let starts = 0
+      carousel = new Carousel(host, Array.from({ length: 4 }, (_, index) => ({
+        lazy: true,
+        content: () => {
+          if (index === 3 && !changed) {
+            changed = true
+            if (action === 'update') carousel.update({ gap: 8 })
+            else carousel.destroy()
+          }
+          return document.createElement('article')
+        },
+      })), { transition: 'fade', transitionDuration: 200, plugins: [createLazyLoad({ preload: 0 })] })
+      carousel.on('transition:start', () => { starts++ })
+      carousel.goTo(3)
+      const snapshot = { changed, starts, index: carousel.getIndex(), children: host.children.length }
+      carousel.destroy()
+      host.remove()
+      return snapshot
+    }, action)
+    expect(result.changed).toBe(true)
+    expect(result.starts).toBe(0)
+    expect(result.index).toBe(0)
+    expect(result.children).toBe(action === 'destroy' ? 0 : 1)
+    expect(errors).toEqual([])
+  })
+}
