@@ -2,7 +2,7 @@ name: Quality
 
 on:
   push:
-    branches: [master]
+    branches: [main, master]
   pull_request:
 
 permissions:
@@ -14,8 +14,13 @@ concurrency:
 
 jobs:
   test:
+    name: Node ${{ matrix.node }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20.19', '22', '24']
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -23,16 +28,22 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: ${{ matrix.node }}
+          cache: npm
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
 
       - name: Run tests, typecheck and package build
         run: npm run check
 
+      - name: Verify committed distribution
+        run: git diff --exit-code -- dist
+
       - name: Install Chromium
+        if: matrix.node == '24'
         run: npx playwright install --with-deps chromium
 
       - name: Browser integration tests
+        if: matrix.node == '24'
         run: npm run test:browser
