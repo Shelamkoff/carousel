@@ -1353,3 +1353,323 @@ test('resize callbacks resolve relative targets from their already normalized la
     carousel.destroy()
   }
 })
+
+function observeTransitionLifecycle(carousel) {
+  const events = []
+  const errors = []
+  carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
+  carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
+  carousel.on('slide:change', ({ index, prevIndex }) => events.push(`change:${prevIndex}:${index}`))
+  carousel.on('transition:error', ({ name, error }) => {
+    events.push(`error:${name}`)
+    errors.push(error)
+  })
+  return { events, errors }
+}
+
+for (const action of ['update', 'destroy']) {
+  test(`custom transition creation can ${action} before its late factory result is published`, () => {
+    const pending = clock.frames.size
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    let carousel
+    let container
+    let cleaned = 0
+    const renders = []
+    const transition = {
+      name: `create-${action}`,
+      create(context) {
+        container = context.container
+        container.appendChild(new Element('div'))
+        if (action === 'update') carousel.update({ slidesPerView: 2, gap: 10, transition: 'slide' })
+        else carousel.destroy()
+        return { render(progress) { renders.push(progress) }, destroy() { cleaned++ } }
+      },
+    }
+    const mounted = mount(100, 5, { transition, transitionDuration: 200, plugins: [probe] })
+    carousel = mounted.carousel
+    const { events, errors } = observeTransitionLifecycle(carousel)
+    try {
+      carousel.goTo(3)
+      frame(300)
+      assert.equal(cleaned, 1)
+      assert.deepEqual(renders, [])
+      assert.equal(container.parentNode, null)
+      assert.equal(mounted.viewport.querySelector('.carousel__transition'), null)
+      assert.equal(probe.ctx.getPosition(), 0)
+      assert.deepEqual(events, ['start:3'])
+      assert.deepEqual(errors, [])
+      assert.equal(clock.frames.size, pending)
+      if (action === 'update') {
+        assert.equal(carousel.getIndex(), 0)
+        assert.equal(probe.ctx.getStep(), 55)
+      } else assert.equal(mounted.host.children.length, 0)
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+for (const action of ['update', 'destroy']) {
+  test(`custom transition midpoint rendering can ${action} without committing its retired destination`, () => {
+    const pending = clock.frames.size
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    let carousel
+    let cleaned = 0
+    const renders = []
+    const transition = {
+      name: `midpoint-${action}`,
+      create() {
+        return {
+          render(progress) {
+            renders.push(progress)
+            if (progress !== 0.5) return
+            if (action === 'update') carousel.update({ slidesPerView: 2, gap: 10, transition: 'slide' })
+            else carousel.destroy()
+          },
+          destroy() { cleaned++ },
+        }
+      },
+    }
+    const mounted = mount(100, 5, { transition, transitionDuration: 200, plugins: [probe] })
+    carousel = mounted.carousel
+    const { events, errors } = observeTransitionLifecycle(carousel)
+    try {
+      carousel.goTo(3)
+      frame(100)
+      frame(300)
+      assert.deepEqual(renders, [0, 0.5])
+      assert.equal(cleaned, 1)
+      assert.equal(probe.ctx.getPosition(), 0)
+      assert.equal(mounted.viewport.querySelector('.carousel__transition'), null)
+      assert.deepEqual(events, ['start:3'])
+      assert.deepEqual(errors, [])
+      assert.equal(clock.frames.size, pending)
+      if (action === 'update') {
+        assert.equal(carousel.getIndex(), 0)
+        assert.equal(probe.ctx.getStep(), 55)
+      } else assert.equal(mounted.host.children.length, 0)
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+for (const phase of ['create', 'midpoint', 'final']) {
+  test(`custom transition ${phase} failures release resources and settle the current target once`, () => {
+    const pending = clock.frames.size
+    const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+    const failure = new Error(`${phase} failed`)
+    let cleaned = 0
+    const transition = {
+      name: `throw-${phase}`,
+      create({ container }) {
+        container.appendChild(new Element('div'))
+        if (phase === 'create') throw failure
+        return {
+          render(progress) {
+            if (progress === (phase === 'midpoint' ? 0.5 : 1)) throw failure
+          },
+          destroy() { cleaned++ },
+        }
+      },
+    }
+    const { carousel, viewport } = mount(100, 5, { transition, transitionDuration: 200, plugins: [probe] })
+    const { events, errors } = observeTransitionLifecycle(carousel)
+    try {
+      assert.doesNotThrow(() => carousel.goTo(3))
+      frame(100)
+      frame(100)
+      frame(300)
+      assert.equal(carousel.getIndex(), 3)
+      assert.equal(probe.ctx.getPosition(), 300)
+      assert.equal(cleaned, phase === 'create' ? 0 : 1)
+      assert.equal(viewport.querySelector('.carousel__transition'), null)
+      assert.deepEqual(errors, [failure])
+      assert.deepEqual(events, [`start:3`, `error:throw-${phase}`, 'end:3', 'change:0:3'])
+      assert.equal(clock.frames.size, pending)
+    } finally {
+      carousel.destroy()
+    }
+  })
+}
+
+test('custom transition error listeners can update the layout before fallback settlement', () => {
+  const pending = clock.frames.size
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const failure = new Error('midpoint failed')
+  let cleaned = 0
+  const transition = {
+    name: 'error-listener-update',
+    create() {
+      return {
+        render(progress) { if (progress === 0.5) throw failure },
+        destroy() { cleaned++ },
+      }
+    },
+  }
+  const { carousel, viewport } = mount(100, 5, { transition, transitionDuration: 200, plugins: [probe] })
+  const { events, errors } = observeTransitionLifecycle(carousel)
+  carousel.on('transition:error', () => carousel.update({ slidesPerView: 2, gap: 10, transition: 'slide' }))
+  try {
+    carousel.goTo(3)
+    frame(100)
+    frame(300)
+    assert.equal(carousel.getIndex(), 0)
+    assert.equal(probe.ctx.getPosition(), 0)
+    assert.equal(probe.ctx.getStep(), 55)
+    assert.equal(cleaned, 1)
+    assert.equal(viewport.querySelector('.carousel__transition'), null)
+    assert.deepEqual(errors, [failure])
+    assert.deepEqual(events, ['start:3', 'error:error-listener-update'])
+    assert.equal(clock.frames.size, pending)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('custom transition cleanup failures during cancellation never complete the cancelled navigation', () => {
+  const pending = clock.frames.size
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  const failure = new Error('cleanup failed')
+  let cleaned = 0
+  const transition = {
+    name: 'throw-cleanup',
+    create() {
+      return { render() {}, destroy() { cleaned++; throw failure } }
+    },
+  }
+  const { carousel, viewport } = mount(100, 5, { transition, transitionDuration: 200, plugins: [probe] })
+  const { events, errors } = observeTransitionLifecycle(carousel)
+  try {
+    carousel.goTo(3)
+    frame(50)
+    assert.doesNotThrow(() => carousel.update({ gap: 5, transition: 'slide' }))
+    frame(300)
+    assert.equal(carousel.getIndex(), 0)
+    assert.equal(probe.ctx.getPosition(), 0)
+    assert.equal(probe.ctx.getStep(), 105)
+    assert.equal(cleaned, 1)
+    assert.equal(viewport.querySelector('.carousel__transition'), null)
+    assert.deepEqual(errors, [failure])
+    assert.deepEqual(events, ['start:3', 'error:throw-cleanup'])
+    assert.equal(clock.frames.size, pending)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('custom transition cancellation cleanup preserves a nested update and its next request', async () => {
+  const pending = clock.frames.size
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  let carousel
+  let cleaned = 0
+  const transition = {
+    name: 'cancel-update-next',
+    create() {
+      return {
+        render() {},
+        destroy() {
+          if (++cleaned !== 1) return
+          carousel.update({ gap: 20, transition: 'slide', transitionDuration: 0 })
+          carousel.next()
+        },
+      }
+    },
+  }
+  const mounted = mount(100, 5, { transition, transitionDuration: 200, plugins: [probe] })
+  carousel = mounted.carousel
+  const { events, errors } = observeTransitionLifecycle(carousel)
+  try {
+    carousel.goTo(3)
+    frame(50)
+    carousel.update({ gap: 5 })
+    await Promise.resolve()
+    frame(300)
+    assert.equal(cleaned, 1)
+    assert.equal(probe.ctx.getStep(), 120)
+    assert.equal(carousel.getIndex(), 1)
+    assert.equal(probe.ctx.getPosition(), 120)
+    assert.equal(mounted.viewport.querySelector('.carousel__transition'), null)
+    assert.deepEqual(events, ['start:3', 'start:1', 'end:1', 'change:0:1'])
+    assert.deepEqual(errors, [])
+    assert.equal(clock.frames.size, pending)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('custom transition completion cleanup can replace the layout and navigate without an obsolete completion', async () => {
+  const pending = clock.frames.size
+  const probe = { name: 'position-probe', install(ctx) { this.ctx = ctx } }
+  let carousel
+  let cleaned = 0
+  const transition = {
+    name: 'complete-update-navigation',
+    create() {
+      return {
+        render() {},
+        destroy() {
+          if (++cleaned !== 1) return
+          carousel.update({ gap: 20, transition: 'slide', transitionDuration: 0 })
+          carousel.goTo(4)
+        },
+      }
+    },
+  }
+  const mounted = mount(100, 5, { transition, transitionDuration: 200, plugins: [probe] })
+  carousel = mounted.carousel
+  const { events, errors } = observeTransitionLifecycle(carousel)
+  try {
+    carousel.goTo(2)
+    frame(200)
+    await Promise.resolve()
+    frame(300)
+    assert.equal(cleaned, 1)
+    assert.equal(carousel.getIndex(), 4)
+    assert.equal(probe.ctx.getStep(), 120)
+    assert.equal(probe.ctx.getPosition(), 480)
+    assert.equal(mounted.viewport.querySelector('.carousel__transition'), null)
+    assert.deepEqual(events, ['start:2', 'start:4', 'end:4', 'change:2:4'])
+    assert.deepEqual(errors, [])
+    assert.equal(clock.frames.size, pending)
+  } finally {
+    carousel.destroy()
+  }
+})
+
+test('custom transition factories can queue navigation without replacing an unpublished owner', async () => {
+  const pending = clock.frames.size
+  let carousel
+  const instances = []
+  const transition = {
+    name: 'factory-navigation',
+    create() {
+      const state = { renders: [], cleaned: 0 }
+      instances.push(state)
+      if (instances.length === 1) carousel.goTo(4)
+      return {
+        render(progress) { state.renders.push(progress) },
+        destroy() { state.cleaned++ },
+      }
+    },
+  }
+  const mounted = mount(100, 5, { transition, transitionDuration: 200 })
+  carousel = mounted.carousel
+  const { events, errors } = observeTransitionLifecycle(carousel)
+  try {
+    carousel.goTo(2)
+    await Promise.resolve()
+    assert.equal(instances.length, 2)
+    assert.deepEqual(instances[0], { renders: [0], cleaned: 1 })
+    frame(200)
+    frame(300)
+    assert.equal(carousel.getIndex(), 4)
+    assert.deepEqual(instances[1], { renders: [0, 0.5, 1], cleaned: 1 })
+    assert.equal(mounted.viewport.querySelector('.carousel__transition'), null)
+    assert.deepEqual(events, ['start:2', 'start:4', 'end:4', 'change:0:4'])
+    assert.deepEqual(errors, [])
+    assert.equal(clock.frames.size, pending)
+  } finally {
+    carousel.destroy()
+  }
+})

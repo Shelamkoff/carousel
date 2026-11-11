@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test'
 
-const transitions = ['stairs', 'pixel', 'curtain']
+const transitions = ['stairs', 'stairs-horizontal', 'pixel', 'curtain']
 
 async function mount(page, transition, options = {}) {
   await page.evaluate(async ({ transition, options }) => {
@@ -99,7 +99,7 @@ for (const transition of transitions) {
     expect(result.during.variant).toBe(transition)
     expect(result.during.hidden).toBe('true')
     expect(result.during.inert).toBe(true)
-    expect(result.during.pieces).toBe({ stairs: 8, pixel: 64, curtain: 2 }[transition])
+    expect(result.during.pieces).toBe({ stairs: 8, 'stairs-horizontal': 8, pixel: 64, curtain: 2 }[transition])
     expect(result.during.color).toBe('rgb(12, 34, 56)')
     expect(result.during.pointerEvents).toBe('none')
     expect(result.during.index).toBe(0)
@@ -258,4 +258,277 @@ test('a real pointer drag takes over an active cover transition without stale co
   expect(result.overlays).toBe(0)
   expect(result.changes).toEqual([['change', origin, destination]])
   expect(errors).toEqual([])
+})
+
+test('horizontal stairs cover fractional viewport rows without seams and alternate their travel direction', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { ViewportTransition } = await import('/src/transitions/ViewportTransition.js')
+    const viewport = document.createElement('div')
+    viewport.style.cssText = 'position:relative;overflow:hidden;width:501.5px;height:193.3px;--carousel-transition-color:rgb(23,45,67)'
+    document.body.append(viewport)
+    const snapshots = []
+    try {
+      for (const backwards of [false, true]) {
+        const transition = new ViewportTransition(viewport, 'stairs-horizontal', backwards)
+        transition.initialize()
+        const overlay = viewport.querySelector('.carousel__transition')
+        const snapshot = progress => {
+          transition.render(progress)
+          const bounds = viewport.getBoundingClientRect()
+          return [...overlay.children].map(piece => {
+            const rect = piece.getBoundingClientRect()
+            const style = getComputedStyle(piece)
+            const matrix = new DOMMatrix(style.transform)
+            return {
+              left: rect.left - bounds.left, right: rect.right - bounds.left,
+              top: rect.top - bounds.top, bottom: rect.bottom - bounds.top,
+              width: rect.width, height: rect.height,
+              x: matrix.m41, y: matrix.m42, opacity: style.opacity, color: style.backgroundColor,
+            }
+          })
+        }
+        snapshots.push({ backwards, initial: snapshot(0), entering: snapshot(0.17), covered: snapshot(0.5), final: snapshot(1) })
+        transition.destroy()
+      }
+      return {
+        snapshots,
+        width: viewport.getBoundingClientRect().width,
+        height: viewport.getBoundingClientRect().height,
+        leftovers: viewport.childElementCount,
+      }
+    } finally {
+      viewport.remove()
+    }
+  })
+  expect(result.leftovers).toBe(0)
+  for (const snapshot of result.snapshots) {
+    expect(snapshot.covered).toHaveLength(8)
+    let bottom = 0
+    for (let index = 0; index < 8; index++) {
+      const row = snapshot.covered[index]
+      expect(row.top).toBeCloseTo(index * result.height / 8, 1)
+      expect(row.top).toBeLessThanOrEqual(bottom + 0.1)
+      expect(row.left).toBeLessThanOrEqual(0.1)
+      expect(row.right).toBeGreaterThanOrEqual(result.width)
+      expect(row.height).toBeGreaterThanOrEqual(result.height / 8)
+      expect(row.height).toBeLessThan(result.height / 8 + 1)
+      expect(row.y).toBe(0)
+      expect(row.opacity).toBe('1')
+      expect(row.color).toBe('rgb(23, 45, 67)')
+      bottom = row.bottom
+      const initial = snapshot.initial[index]
+      const final = snapshot.final[index]
+      expect(initial.top).toBeCloseTo(row.top, 1)
+      expect(final.top).toBeCloseTo(row.top, 1)
+      if (index % 2 === 0) {
+        expect(initial.right).toBeLessThanOrEqual(0.1)
+        expect(final.left).toBeGreaterThanOrEqual(result.width)
+      } else {
+        expect(initial.left).toBeGreaterThanOrEqual(result.width)
+        expect(final.right).toBeLessThanOrEqual(0.1)
+      }
+    }
+    expect(bottom).toBeGreaterThanOrEqual(result.height)
+  }
+  const [forward, backward] = result.snapshots
+  expect(Math.abs(forward.entering[0].x)).toBeLessThan(Math.abs(forward.entering[7].x))
+  expect(Math.abs(backward.entering[0].x)).toBeGreaterThan(Math.abs(backward.entering[7].x))
+  for (let index = 0; index < 8; index++) {
+    expect(Math.abs(backward.entering[index].x)).toBeCloseTo(Math.abs(forward.entering[7 - index].x), 3)
+  }
+})
+
+async function mountCustom(page, options = {}) {
+  await mount(page, 'slide', options)
+  await page.evaluate(() => {
+    const { carousel, context } = window.transitionTest
+    const instances = []
+    const definition = {
+      name: 'application-wipe',
+      create(factoryContext) {
+        const { container, direction } = factoryContext
+        const containerBounds = container.getBoundingClientRect()
+        const viewportBounds = context.getViewport().getBoundingClientRect()
+        const panel = container.ownerDocument.createElement('div')
+        panel.className = 'application-transition-panel'
+        panel.style.cssText = 'position:absolute;inset:0;background:var(--carousel-transition-color);opacity:0'
+        container.append(panel)
+        const record = {
+          container, direction, frames: [], destroyed: 0, covered: false,
+          factoryConnected: container.isConnected,
+          factorySize: { width: containerBounds.width, height: containerBounds.height },
+          viewportSize: { width: viewportBounds.width, height: viewportBounds.height },
+          contextFrozen: Object.isFrozen(factoryContext),
+        }
+        instances.push(record)
+        return {
+          render(progress) {
+            panel.style.opacity = String(1 - Math.abs(progress * 2 - 1))
+            record.frames.push({ progress, index: carousel.getIndex() })
+            if (progress === 0.5) {
+              const bounds = context.getViewport().getBoundingClientRect()
+              const rect = panel.getBoundingClientRect()
+              record.covered = rect.left <= bounds.left && rect.top <= bounds.top
+                && rect.right >= bounds.right && rect.bottom >= bounds.bottom
+                && getComputedStyle(panel).opacity === '1'
+            }
+          },
+          destroy() { record.destroyed++ },
+        }
+      },
+    }
+    window.customTransitionTest = { definition, instances }
+    carousel.update({ transition: definition })
+  })
+}
+
+test('a public custom transition receives the core timeline and a fresh instance for each direction', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await mountCustom(page, { count: 3, loop: true, slidesPerView: 2.5, gap: 12 })
+  const result = await page.evaluate(async () => {
+    const { carousel, context, host, contents, events, connections } = window.transitionTest
+    const { instances } = window.customTransitionTest
+    const values = [...new FormData(host)]
+    const initialConnections = connections()
+    const during = []
+    for (const action of ['next', 'prev']) {
+      const done = new Promise(resolve => carousel.once('transition:end', resolve))
+      carousel[action]()
+      const overlay = host.querySelector('.carousel__transition')
+      during.push({
+        name: overlay.dataset.transition,
+        inert: overlay.inert,
+        hidden: overlay.getAttribute('aria-hidden'),
+        pointerEvents: getComputedStyle(overlay).pointerEvents,
+        panelCount: overlay.querySelectorAll('.application-transition-panel').length,
+      })
+      await done
+    }
+    return {
+      during,
+      records: instances.map(record => ({
+        direction: record.direction, frames: record.frames, destroyed: record.destroyed,
+        covered: record.covered, connected: record.container.isConnected,
+        factoryConnected: record.factoryConnected, factorySize: record.factorySize,
+        viewportSize: record.viewportSize, contextFrozen: record.contextFrozen,
+      })),
+      index: carousel.getIndex(), events,
+      values, finalValues: [...new FormData(host)],
+      initialConnections, finalConnections: connections(),
+      sameContent: context.getSlideElements().every((slide, index) => slide.firstChild === contents[index]),
+      overlays: host.querySelectorAll('.carousel__transition').length,
+    }
+  })
+  expect(result.during).toEqual(Array.from({ length: 2 }, () => ({
+    name: 'application-wipe', inert: true, hidden: 'true', pointerEvents: 'none', panelCount: 1,
+  })))
+  expect(result.records).toHaveLength(2)
+  for (const [index, record] of result.records.entries()) {
+    const from = index === 0 ? 0 : 1
+    const to = index === 0 ? 1 : 0
+    expect(record.direction).toBe(index === 0 ? 1 : -1)
+    expect(record.factoryConnected).toBe(true)
+    expect(record.contextFrozen).toBe(true)
+    expect(record.factorySize).toEqual(record.viewportSize)
+    expect(record.factorySize.width).toBeGreaterThan(0)
+    expect(record.factorySize.height).toBeGreaterThan(0)
+    expect(record.destroyed).toBe(1)
+    expect(record.connected).toBe(false)
+    expect(record.covered).toBe(true)
+    expect(record.frames[0]).toEqual({ progress: 0, index: from })
+    expect(record.frames.at(-1)).toEqual({ progress: 1, index: to })
+    expect(record.frames.filter(frame => frame.progress === 0.5)).toEqual([{ progress: 0.5, index: from }])
+    let previous = 0
+    for (const frame of record.frames) {
+      expect(frame.progress).toBeGreaterThanOrEqual(previous)
+      expect(frame.progress).toBeLessThanOrEqual(1)
+      expect(frame.index).toBe(frame.progress <= 0.5 ? from : to)
+      previous = frame.progress
+    }
+  }
+  expect(result.index).toBe(0)
+  expect(result.events).toEqual([
+    ['before', 0, 1], ['start', 0, 1], ['end', 1], ['change', 0, 1],
+    ['before', 1, 0], ['start', 1, 0], ['end', 0], ['change', 1, 0],
+  ])
+  expect(result.finalValues).toEqual(result.values)
+  expect(result.finalConnections).toBe(result.initialConnections)
+  expect(result.sameContent).toBe(true)
+  expect(result.overlays).toBe(0)
+  expect(errors).toEqual([])
+})
+
+test('custom transition instances stop rendering after update, resize and destroy cleanup', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await mountCustom(page)
+  const result = await page.evaluate(async () => {
+    const { carousel, host, events } = window.transitionTest
+    const { instances } = window.customTransitionTest
+    const retired = () => instances.map(record => ({ frames: record.frames.length, destroyed: record.destroyed, connected: record.container.isConnected }))
+    carousel.next()
+    carousel.update({ gap: 8 })
+    const afterUpdate = retired()
+    await new Promise(resolve => setTimeout(resolve, 260))
+    const afterUpdateWait = retired()
+    const updateCompletions = events.filter(event => event[0] === 'end' || event[0] === 'change')
+    const resized = new Promise(resolve => carousel.once('transition:end', resolve))
+    carousel.goTo(2)
+    host.style.width = '320px'
+    await resized
+    const indexAfterResize = carousel.getIndex()
+    const resizeCompletions = events.filter(event => event[0] === 'end' || event[0] === 'change')
+    carousel.goTo(1)
+    carousel.destroy()
+    const afterDestroy = retired()
+    await new Promise(resolve => setTimeout(resolve, 260))
+    return {
+      afterUpdate, afterUpdateWait, updateCompletions,
+      indexAfterResize, resizeCompletions,
+      afterDestroy, afterDestroyWait: retired(),
+      finalCompletions: events.filter(event => event[0] === 'end' || event[0] === 'change'),
+      children: host.childElementCount,
+      overlays: document.querySelectorAll('.carousel__transition').length,
+    }
+  })
+  expect(result.afterUpdate).toHaveLength(1)
+  expect(result.afterUpdate[0]).toMatchObject({ destroyed: 1, connected: false })
+  expect(result.afterUpdateWait).toEqual(result.afterUpdate)
+  expect(result.updateCompletions).toEqual([])
+  expect(result.indexAfterResize).toBe(2)
+  expect(result.resizeCompletions).toEqual([['end', 2], ['change', 0, 2]])
+  expect(result.afterDestroy).toHaveLength(3)
+  expect(result.afterDestroy.every(record => record.destroyed === 1 && !record.connected)).toBe(true)
+  expect(result.afterDestroyWait).toEqual(result.afterDestroy)
+  expect(result.finalCompletions).toEqual(result.resizeCompletions)
+  expect(result.children).toBe(0)
+  expect(result.overlays).toBe(0)
+  expect(errors).toEqual([])
+})
+
+test('zero duration and reduced motion skip custom factories while retaining navigation events', async ({ page }) => {
+  await mountCustom(page, { transitionDuration: 900 })
+  await page.emulateMedia({ reducedMotion: 'reduce' })
+  const reduced = await page.evaluate(() => {
+    const { carousel, host, events } = window.transitionTest
+    carousel.next()
+    return { index: carousel.getIndex(), factories: window.customTransitionTest.instances.length, overlays: host.querySelectorAll('.carousel__transition').length, events: [...events] }
+  })
+  expect(reduced).toEqual({
+    index: 1, factories: 0, overlays: 0,
+    events: [['before', 0, 1], ['start', 0, 1], ['end', 1], ['change', 0, 1]],
+  })
+  await page.emulateMedia({ reducedMotion: 'no-preference' })
+  const instant = await page.evaluate(() => {
+    const { carousel, host, events } = window.transitionTest
+    carousel.update({ transitionDuration: 0 })
+    events.length = 0
+    carousel.next()
+    return { index: carousel.getIndex(), factories: window.customTransitionTest.instances.length, overlays: host.querySelectorAll('.carousel__transition').length, events: [...events] }
+  })
+  expect(instant).toEqual({
+    index: 2, factories: 0, overlays: 0,
+    events: [['before', 1, 2], ['start', 1, 2], ['end', 2], ['change', 1, 2]],
+  })
 })

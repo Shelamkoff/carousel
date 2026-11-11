@@ -422,8 +422,10 @@
     <div id="demo-transitions"></div>
     <div class="demo-controls" role="group" aria-label="Slide transition presets">
       <button type="button" data-transition-choice="stairs" aria-pressed="true">Stairs</button>
+      <button type="button" data-transition-choice="stairs-horizontal" aria-pressed="false">Horizontal stairs</button>
       <button type="button" data-transition-choice="pixel" aria-pressed="false">Pixel</button>
       <button type="button" data-transition-choice="curtain" aria-pressed="false">Curtain</button>
+      <button type="button" data-transition-choice="custom-iris" aria-pressed="false">Custom iris</button>
       <div class="transition-duration">
         <label for="transition-duration">Duration</label>
         <select id="transition-duration">
@@ -434,6 +436,7 @@
       </div>
     </div>
     <output id="transition-status" class="demo-status" aria-live="polite"></output>
+    <p class="demo-note">Horizontal stairs alternate left-to-right and right-to-left rows. Custom iris is defined in this demo through the public transition API.</p>
   </section>
 
   <section class="demo-section" id="theming-example">
@@ -843,7 +846,29 @@
       content: `<figure class="effect-figure"><img src="./demo-assets/panel-${index + 1}.svg" alt="Geometric panel ${index + 1}" width="800" height="400"><figcaption>Panel ${index + 1}</figcaption></figure>`,
     }))
     let activeTransition = 'stairs'
-    const transitionLabels = { stairs: 'Stairs', pixel: 'Pixel', curtain: 'Curtain' }
+    const transitionLabels = {
+      stairs: 'Stairs', 'stairs-horizontal': 'Horizontal stairs',
+      pixel: 'Pixel', curtain: 'Curtain', 'custom-iris': 'Custom iris',
+    }
+    // Application-owned effect: no registry, core edits or extra animation clock.
+    const customIris = {
+      name: 'custom-iris',
+      create({ container }) {
+        const panel = container.ownerDocument.createElement('div')
+        Object.assign(panel.style, {
+          position: 'absolute', inset: '0',
+          background: 'var(--carousel-transition-color, #17181b)',
+        })
+        container.appendChild(panel)
+        return {
+          render(progress) {
+            const cover = progress < 0.5 ? progress * 2 : (1 - progress) * 2
+            const eased = cover * cover * (3 - 2 * cover)
+            panel.style.clipPath = `circle(${eased * 75}% at 50% 50%)`
+          },
+        }
+      },
+    }
     const transitionCarousel = new Carousel('#demo-transitions', transitionSlides, {
       loop: true,
       transition: activeTransition,
@@ -859,7 +884,9 @@
     for (const button of transitionButtons) {
       button.addEventListener('click', () => {
         activeTransition = button.dataset.transitionChoice
-        transitionCarousel.update({ transition: activeTransition })
+        transitionCarousel.update({
+          transition: activeTransition === 'custom-iris' ? customIris : activeTransition,
+        })
         for (const choice of transitionButtons) {
           choice.setAttribute('aria-pressed', String(choice === button))
         }

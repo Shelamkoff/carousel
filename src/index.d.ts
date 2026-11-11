@@ -17,6 +17,10 @@ export type { AutoplayPlugin } from './plugins/autoplay.js'
 export type {
   SlideData,
   CarouselTransition,
+  CarouselTransitionName,
+  CarouselTransitionContext,
+  CarouselTransitionInstance,
+  CarouselTransitionDefinition,
   PluginContext,
   CarouselPlugin,
   CarouselOptions,

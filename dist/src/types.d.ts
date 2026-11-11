@@ -9,7 +9,29 @@ export interface SlideData {
 
 /* ── Transition ── */
 
-export type CarouselTransition = 'slide' | 'fade' | 'stairs' | 'pixel' | 'curtain'
+export type CarouselTransitionName = 'slide' | 'fade' | 'stairs' | 'stairs-horizontal' | 'pixel' | 'curtain'
+
+export interface CarouselTransitionContext {
+  /** Owned, inert overlay. Add decorative content here, without moving slides. */
+  readonly container: HTMLElement
+  /** Actual navigation direction, including wrap-around. */
+  readonly direction: 1 | -1
+}
+
+export interface CarouselTransitionInstance {
+  /** 0: clear; 0.5: fully covered; 1: clear. Called synchronously by Carousel. */
+  render(progress: number): void
+  /** Release external resources; the container is removed automatically. */
+  destroy?(): void
+}
+
+export interface CarouselTransitionDefinition {
+  readonly name: string
+  /** Return a fresh synchronous renderer for each navigation. */
+  create(context: CarouselTransitionContext): CarouselTransitionInstance
+}
+
+export type CarouselTransition = CarouselTransitionName | CarouselTransitionDefinition
 
 /* ── Plugin system ── */
 
@@ -90,6 +112,7 @@ export interface CarouselEventMap {
   'slide:change': [payload: { index: number; prevIndex: number; slide: SlideData }]
   'transition:start': [payload: { fromIndex: number; toIndex: number }]
   'transition:end': [payload: { index: number }]
+  'transition:error': [payload: { name: string; error: Error }]
   'resize': [payload: { slidesPerView: number }]
   'autoplay:start': []
   'autoplay:stop': []

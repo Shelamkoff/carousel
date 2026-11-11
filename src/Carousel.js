@@ -36,7 +36,7 @@ function validateResolvedOptions(options) {
     throw new RangeError('Carousel: transitionDuration must be a non-negative number')
   }
   if (options.transition !== 'slide' && options.transition !== 'fade' && !isViewportTransition(options.transition)) {
-    throw new TypeError('Carousel: transition must be "slide", "fade", "stairs", "pixel", or "curtain"')
+    throw new TypeError('Carousel: transition must be a built-in name or a definition with name and create(context)')
   }
   if (!Number.isInteger(options.startIndex) || options.startIndex < 0) {
     throw new RangeError('Carousel: startIndex must be a non-negative integer')
@@ -216,7 +216,8 @@ export class Carousel {
         // A responsive geometry change settles the pending destination and
         // retires the decorative panels before publishing the resized state.
         const targetIndex = this.#selectedIndex
-        this.#stopAllAnimations()
+        const epoch = this.#stopAllAnimations()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
         this.#pendingResize = true
         this.#pendingResizeStep = previousStep
         this.#position = targetIndex * previousStep
@@ -301,10 +302,10 @@ export class Carousel {
 
   #handleBreakpointChange() {
     const oldIdx = this.getIndex()
-    this.#stopAllAnimations()
+    const epoch = this.#stopAllAnimations()
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
     this.#pendingResize = false
     this.#pendingResizeStep = null
-    const epoch = this.#navigationEpoch
     this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
     const opts = this.#resolvedOptions
     this.#dispatchEvents(() => {
@@ -329,14 +330,33 @@ export class Carousel {
 
   /** Stop all running animations (rAF, CSS transition, fade). */
   #stopAllAnimations() {
-    this.#navigationEpoch++
+    const epoch = ++this.#navigationEpoch
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
     if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
     this.#cancelFade()
-    this.#viewportTransition?.destroy()
-    this.#viewportTransition = null
     this.#trackRenderer.stopAnimation()
     this.#animating = false
+    if (this.#viewportTransition) this.#destroyViewportTransition(this.#viewportTransition)
+    return epoch
+  }
+
+  #destroyViewportTransition(transition) {
+    // Retire shared ownership before user cleanup can reenter the carousel.
+    if (this.#viewportTransition === transition) this.#viewportTransition = null
+    try {
+      this.#dispatchEvents(() => transition.destroy())
+    } catch (error) {
+      this.#reportTransitionError(transition.name, error)
+    }
+  }
+
+  #reportTransitionError(name, error) {
+    const normalized = error instanceof Error ? error : new Error(String(error))
+    if (this.#destroyed) {
+      console.error(`Carousel: transition "${name}" failed`, normalized)
+      return
+    }
+    this.#dispatchEvents(() => this.#events.emit('transition:error', { name, error: normalized }))
   }
 
   #onAnimationComplete() {
@@ -495,7 +515,8 @@ export class Carousel {
       // its coordinate system. Gesture callers read their origin afterward.
       stopAnimation: () => {
         if (this.#destroyed) return
-        this.#stopAllAnimations()
+        const epoch = this.#stopAllAnimations()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
         if (this.#pendingResize) {
           this.#applyResize(this.#pendingResizeStep ?? this.#step())
         }
@@ -504,7 +525,9 @@ export class Carousel {
       getPosition: () => this.#position,
       setPosition: (pos) => {
         if (!Number.isFinite(pos)) throw new TypeError('Carousel position must be finite')
-        this.#stopAllAnimations()
+        if (this.#destroyed) return
+        const epoch = this.#stopAllAnimations()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
         this.#position = pos
         this.#render()
       },
@@ -623,7 +646,8 @@ export class Carousel {
       // and animation clock alive, even once getIndex() rounds to that slide.
       if (fromIndex === undefined && index === this.#selectedIndex) return
       previous = fromIndex ?? this.#prevIndex
-      this.#stopAllAnimations()
+      const stoppedEpoch = this.#stopAllAnimations()
+      if (this.#destroyed || this.#navigationEpoch !== stoppedEpoch) return
       if (this.#pendingResize) {
         const epoch = this.#navigationEpoch
         this.#applyResize(this.#pendingResizeStep ?? this.#step())
@@ -690,24 +714,52 @@ export class Carousel {
     const transition = new ViewportTransition(
       viewport, this.#resolvedOptions.transition, targetPos < this.#position,
     )
+    const epoch = this.#navigationEpoch
+    const current = () => !this.#destroyed && this.#navigationEpoch === epoch
+    const active = () => current() && this.#viewportTransition === transition
     this.#viewportTransition = transition
+    const fail = error => {
+      // A stale callback must never stop a replacement transition or overwrite
+      // layout installed by update/destroy inside the effect itself.
+      if (!active()) {
+        this.#reportTransitionError(transition.name, error)
+        return
+      }
+      const stoppedEpoch = this.#stopAllAnimations()
+      this.#reportTransitionError(transition.name, error)
+      if (this.#destroyed || this.#navigationEpoch !== stoppedEpoch) return
+      this.#position = targetPos
+      this.#render()
+      this.#onAnimationComplete()
+    }
+    try {
+      this.#dispatchEvents(() => transition.initialize())
+    } catch (error) {
+      fail(error)
+      return
+    }
+    if (!active()) return
     let committed = false
     this.#runAnimation(duration, progress => {
-      if (!committed && progress >= 0.5) {
-        transition.render(0.5)
-        this.#position = targetPos
-        this.#render()
-        committed = true
-        // Plugins such as parallax may have sampled the old position earlier
-        // in this frame. Reveal only after their next update; the final frame
-        // still completes immediately, including the background timer fallback.
-        if (progress < 1) return
+      if (!active()) return
+      try {
+        if (!committed && progress >= 0.5) {
+          this.#dispatchEvents(() => transition.render(0.5))
+          if (!active()) return
+          this.#position = targetPos
+          this.#render()
+          committed = true
+          // Let position-sensitive plugins sample the committed destination
+          // before revealing it, unless this is the final fallback frame.
+          if (progress < 1) return
+        }
+        this.#dispatchEvents(() => transition.render(progress))
+      } catch (error) {
+        fail(error)
       }
-      transition.render(progress)
     }, () => {
-      transition.destroy()
-      if (this.#viewportTransition === transition) this.#viewportTransition = null
-      this.#onAnimationComplete()
+      this.#destroyViewportTransition(transition)
+      if (current()) this.#onAnimationComplete()
     })
   }
 
@@ -879,8 +931,8 @@ export class Carousel {
       if (current()) done()
     }
     const frame = now => {
-      this.#rafId = 0
       if (settled || !current()) return
+      this.#rafId = 0
       const progress = Math.max(0, Math.min((now - startTime) / duration, 1))
       if (progress >= 1) { finish(); return }
       render(progress)
@@ -942,11 +994,11 @@ export class Carousel {
   }
 
   #rebuildTrack(index = this.getIndex(), refreshContent = false) {
-    this.#stopAllAnimations()
+    const epoch = this.#stopAllAnimations()
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
     this.#pendingResize = false
     this.#pendingResizeStep = null
     const opts = this.#resolvedOptions
-    const epoch = this.#navigationEpoch
     this.#dispatchEvents(() => {
       this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
         slidesPerView: opts.slidesPerView ?? 1,

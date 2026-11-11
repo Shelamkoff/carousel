@@ -11,7 +11,7 @@ Framework-agnostic, position-based carousel and slider with responsive layouts, 
 ## Highlights
 
 - Responsive single- and multi-slide layouts with fixed or automatic scroll steps.
-- Loop mode, slide/fade and stairs/pixel/curtain transitions, keyboard control, touch and mouse gestures.
+- Loop mode, slide/fade and stairs/horizontal stairs/pixel/curtain transitions, custom effects, keyboard control, touch and mouse gestures.
 - Arrows, dots, thumbnails, autoplay, lazy loading, swipe, and parallax plugins.
 - Framework-independent lifecycle, typed events, and TypeScript declarations.
 
@@ -101,7 +101,7 @@ interface SlideData {
 | `slidesPerView` | `number` | `1` | Number of visible slides. Positive values are required. |
 | `slidesPerScroll` | `number \| 'auto'` | `1` | Navigation step. `'auto'` uses the resolved visible count. |
 | `gap` | `number` | `0` | Gap between slides in CSS pixels. |
-| `transition` | `CarouselTransition` | `'slide'` | Slide, fade, stairs, pixel or curtain. See transitions below. |
+| `transition` | `CarouselTransition` | `'slide'` | A built-in name or a custom transition definition. See transitions below. |
 | `transitionDuration` | `number` | `400` | Transition duration in milliseconds. |
 | `loop` | `boolean` | `false` | Circular navigation using positioned originals. In short loops only, inert visual replicas fill the viewport. |
 | `startIndex` | `number` | `0` | Initial logical slide index. Used only during construction. |
@@ -129,10 +129,11 @@ const carousel = new Carousel('#gallery', slides, {
 | `'slide'` | Move the track to the next position. |
 | `'fade'` | Cross-fade single-slide views; multi-slide views use track movement. |
 | `'stairs'` | Vertical panels cover the viewport and leave in a staggered cascade. |
+| `'stairs-horizontal'` | Eight horizontal rows sweep in alternating directions: left to right, then right to left. Backward navigation reverses the row stagger. |
 | `'pixel'` | A grid of tiles covers and reveals the viewport in a deterministic order. |
 | `'curtain'` | Two vertical halves close, then part horizontally. |
 
-The three reveal effects work across the whole viewport, including loop and multi-slide layouts. `transitionDuration` is the total time for both cover and reveal. The destination is shown when the panels fully cover the viewport. The panels are decorative: they do not clone slide contents or change form values and custom-element instances. All effects honor reduced motion.
+The reveal effects work across the whole viewport, including loop and multi-slide layouts. `transitionDuration` is the total time for both cover and reveal. The destination is shown when the panels fully cover the viewport. The panels are decorative: they do not clone slide contents or change form values and custom-element instances. All effects honor reduced motion.
 
 ```js
 const carousel = new Carousel('#gallery', slides, {
@@ -150,6 +151,40 @@ Set the reveal panel color with a CSS custom property on the host element:
   --carousel-transition-color: #17181b;
 }
 ```
+
+### Custom transitions
+
+Pass a `CarouselTransitionDefinition` directly as `transition`; there is no global registration or core modification. Each navigation calls `create()` for a fresh renderer. The same definition can be shared by carousels and used in `update()` or breakpoints.
+
+```js
+const iris = {
+  name: 'iris',
+  create({ container, direction }) {
+    const panel = container.ownerDocument.createElement('div')
+    Object.assign(panel.style, {
+      position: 'absolute', inset: '0',
+      background: 'var(--carousel-transition-color, #17181b)',
+    })
+    container.appendChild(panel)
+    return {
+      render(progress) {
+        const cover = progress < 0.5 ? progress * 2 : (1 - progress) * 2
+        const eased = cover * cover * (3 - 2 * cover)
+        panel.style.clipPath = `circle(${eased * 75}% at 50% 50%)`
+      },
+    }
+  },
+}
+
+carousel.update({ transition: iris, transitionDuration: 800 })
+carousel.on('transition:error', ({ name, error }) => console.error(name, error))
+```
+
+`container` is an owned, clipped, inert decorative layer; create elements with its `ownerDocument`. `direction` is `1` for forward movement and `-1` for backward movement, including loop wraps. The iris is symmetric and does not need direction. Work only inside this layer; do not move or clone live slides. Its children inherit the carousel's theme.
+
+`create()` and `render()` are synchronous. Progress runs from `0` to `1`: the layer must be clear at both ends and fully cover the viewport at `0.5`. Carousel renders that exact boundary before switching slides, even if a frame is delayed. It owns the clock, duration, reduced motion, interruption and events. Reduced motion or a zero duration skips factory creation and completes navigation immediately. On viewport resize the pending destination is settled and the effect is removed.
+
+An optional `destroy()` releases resources created outside the layer, such as observers or third-party instances; the layer itself is removed automatically. Cleanup also runs on cancellation, failure, and if a factory synchronously updates or destroys the carousel before returning. A throwing factory must release any external resources it allocated before it could return a cleanup hook. Errors are reported through `transition:error`; setup/render failures settle the current destination immediately. A callback that has already updated or destroyed the carousel takes precedence, so obsolete work never completes afterward. Definitions and their renderers are trusted application code, like slide factories and plugins.
 
 ## Theming
 
@@ -244,6 +279,7 @@ Do not call methods after `destroy()`. Create a new instance if the host needs t
 | `slide:change` | `{ index, prevIndex, slide }` |
 | `transition:start` | `{ fromIndex, toIndex }` |
 | `transition:end` | `{ index }` |
+| `transition:error` | `{ name, error }` |
 | `resize` | `{ slidesPerView }` |
 | `autoplay:start` / `autoplay:stop` | no payload |
 | `slide:lazyload` | `{ index, element }` |
@@ -317,7 +353,7 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, fixed scroll steps, auto-height media, dynamic collections, lazy rendering and all three reveal transitions. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive layouts, short fractional loops, autoplay, fade, thumbnails, parallax, custom themes, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, horizontal stairs and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
 
 To run the same demo locally:
 
