@@ -118,3 +118,106 @@ for (const model of [
     }
   })
 }
+
+async function openInteractiveFixture(page, { shadow = false, custom = false } = {}) {
+  await page.route('**/__focus_visibility__', route => route.fulfill({ contentType: 'text/html', body: fixture }))
+  await page.goto('/__focus_visibility__')
+  await page.evaluate(async ({ shadow, custom }) => {
+    const { Carousel, createKeyboard } = await import('/src/index.js')
+    const state = { created: 0, cleaned: 0, events: [], controls: [], inputEvents: 0 }
+    const transition = { name: 'focus-animation', create({ container }) {
+      state.created++
+      const panel = document.createElement('div')
+      Object.assign(panel.style, { position: 'absolute', inset: '0', background: '#123' })
+      container.append(panel)
+      return {
+        render(progress) { panel.style.opacity = String(1 - Math.abs(2 * progress - 1)) },
+        destroy() { state.cleaned++ },
+      }
+    } }
+    let context
+    const carousel = new Carousel(document.querySelector('#gallery'), Array.from({ length: 4 }, (_, index) => ({
+      content: () => {
+        const article = document.createElement('article')
+        const root = shadow ? article.attachShadow({ mode: 'open' }) : article
+        const input = document.createElement('input')
+        input.setAttribute('aria-label', `Edit slide ${index + 1}`)
+        input.value = `Value ${index + 1}`
+        input.addEventListener('input', () => state.inputEvents++)
+        Object.assign(input.style, { boxSizing: 'border-box', width: '96px', height: '32px' })
+        root.append(input)
+        state.controls.push(input)
+        return article
+      },
+    })), {
+      loop: true,
+      transition: custom ? transition : 'slide',
+      transitionDuration: 10000,
+      plugins: [createKeyboard(), { name: 'focus-probe', install(ctx) { context = ctx } }],
+    })
+    carousel.on('transition:end', ({ index }) => state.events.push(`end:${index}`))
+    carousel.on('slide:change', ({ index }) => state.events.push(`change:${index}`))
+    window.focusFixture = { carousel, context, state }
+  }, { shadow, custom })
+  await page.keyboard.press('Tab')
+  await expect(page.locator('#before')).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.locator('.carousel')).toBeFocused()
+  await page.keyboard.press('Tab')
+  await expect(page.getByRole('textbox', { name: 'Edit slide 1', exact: true })).toBeFocused()
+}
+
+test('Tab reveals the actual Shadow DOM editor without replacing its value or listeners', async ({ page }) => {
+  await openInteractiveFixture(page, { shadow: true })
+  try {
+    await page.keyboard.press('Tab')
+    const editor = page.getByRole('textbox', { name: 'Edit slide 2', exact: true })
+    await expect(editor).toBeFocused()
+    await page.keyboard.press('End')
+    await page.keyboard.type('X')
+    await expect(editor).toHaveValue('Value 2X')
+    const result = await page.evaluate(() => {
+      const { carousel, context, state } = window.focusFixture
+      const slide = context.getSlideElement(1)
+      const editor = slide.querySelector('article').shadowRoot.activeElement
+      return {
+        index: carousel.getIndex(),
+        scrollLeft: context.getViewport().scrollLeft,
+        retained: editor === state.controls[1],
+        inputEvents: state.inputEvents,
+        events: state.events,
+      }
+    })
+    expect(result).toEqual({ index: 1, scrollLeft: 0, retained: true, inputEvents: 1, events: ['end:1', 'change:1'] })
+  } finally {
+    await page.evaluate(() => window.focusFixture.carousel.destroy())
+  }
+})
+
+test('Tab cancels an active loop effect and keeps subsequent configured transitions animated', async ({ page }) => {
+  await openInteractiveFixture(page, { custom: true })
+  try {
+    await page.evaluate(() => window.focusFixture.carousel.goTo(1))
+    await expect(page.locator('.carousel__transition')).toHaveCount(1)
+    await page.keyboard.press('Tab')
+    await expect(page.getByRole('textbox', { name: 'Edit slide 2', exact: true })).toBeFocused()
+    await expect(page.locator('.carousel__transition')).toHaveCount(0)
+    const result = await page.evaluate(() => {
+      const { carousel, context, state } = window.focusFixture
+      return {
+        index: carousel.getIndex(), scrollLeft: context.getViewport().scrollLeft,
+        created: state.created, cleaned: state.cleaned, events: state.events,
+        duration: context.options.transitionDuration,
+      }
+    })
+    expect(result).toEqual({
+      index: 1, scrollLeft: 0, created: 1, cleaned: 1,
+      events: ['end:1', 'change:1'], duration: 10000,
+    })
+    await page.evaluate(() => window.focusFixture.carousel.goTo(2))
+    await expect(page.locator('.carousel__transition')).toHaveCount(1)
+    expect(await page.evaluate(() => window.focusFixture.state.created)).toBe(2)
+  } finally {
+    await page.evaluate(() => window.focusFixture.carousel.destroy())
+  }
+})

@@ -138,6 +138,8 @@ export class Carousel {
   #notifying = false
   #rebuilding = false
   #queuedNavigation = null
+  #focusHandler = null
+  #focusRequest = null
 
   constructor(container, slides, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options)) {
@@ -230,6 +232,69 @@ export class Carousel {
         return
       }
       this.#applyResize(previousStep)
+    })
+
+    // Native Tab/focus() can scroll an overflow:hidden viewport independently
+    // of the position controller. Keep live controls reachable through the
+    // carousel's navigation instead of making off-screen originals inert.
+    this.#focusHandler = event => this.#revealFocusedSlide(event)
+    this.#trackRenderer.getViewport()?.addEventListener('focusin', this.#focusHandler, true)
+  }
+
+  #revealFocusedSlide(event) {
+    this.#focusRequest = null
+    if (this.#destroyed) return
+    const viewport = this.#trackRenderer.getViewport()
+    const path = event.composedPath?.() ?? []
+    if (!path.length) {
+      for (let node = event.target; node; node = node.parentNode) {
+        path.push(node)
+        if (node === viewport) break
+      }
+    }
+    // Inspect the composed path for editors inside Shadow DOM and for this
+    // carousel's own slide when another carousel is nested inside its content.
+    const focused = path[0]
+    const slide = path.find(node => node?.dataset?.index !== undefined
+      && this.#trackRenderer.getSlideElement(Number(node.dataset.index)) === node)
+    if (typeof focused?.getBoundingClientRect !== 'function') return
+    const request = { viewport, focused, slide }
+    this.#focusRequest = request
+    queueMicrotask(() => {
+      if (this.#focusRequest !== request) return
+      this.#focusRequest = null
+      if (this.#destroyed || this.#trackRenderer.getViewport() !== viewport) return
+      // Always clear native focus-scroll, including when a newer application
+      // command superseded the requested reveal or focus left the slide.
+      viewport.scrollLeft = 0
+      if (!slide || request.cancelled) return
+      const current = () => !this.#destroyed
+        && this.#trackRenderer.getViewport() === viewport
+        && this.#trackRenderer.getSlideElement(Number(slide.dataset.index)) === slide
+        && (focused.getRootNode?.() ?? focused.ownerDocument)?.activeElement === focused
+      if (!current()) return
+
+      // Wait until the browser's default focus-scroll has finished, then read
+      // geometry in the carousel's unscrolled coordinate system. These reads
+      // happen only on focus, never in the animation/drag frame loop.
+      const bounds = viewport.getBoundingClientRect()
+      if (bounds.width <= 0) return
+      const control = focused.getBoundingClientRect()
+      const outside = control.width > bounds.width
+        ? control.right <= bounds.left || control.left >= bounds.right
+        : control.left < bounds.left - 0.5 || control.right > bounds.right + 0.5
+      // Focusing another already-visible slide must not move a settled
+      // multi-slide page. An active transition is interrupted for stable focus.
+      if (!outside && !this.#animating) return
+
+      const epoch = this.#stopAllAnimations()
+      if (!current() || this.#navigationEpoch !== epoch) return
+      if (this.#pendingResize) {
+        this.#applyResize(this.#pendingResizeStep ?? this.#step())
+        if (!current() || this.#navigationEpoch !== epoch) return
+      }
+      this.#navigate(Number(slide.dataset.index), undefined, undefined, undefined, 0)
+      if (current()) viewport.scrollLeft = 0
     })
   }
 
@@ -410,7 +475,7 @@ export class Carousel {
             if (this.#queuedNavigation !== queued) return
             this.#queuedNavigation = null
             if (queued.relativeDirection) this.#navigateRelative(queued.relativeDirection)
-            else this.#navigate(queued.index, queued.direction, queued.fromIndex, queued.startPosition)
+            else this.#navigate(queued.index, queued.direction, queued.fromIndex, queued.startPosition, queued.durationOverride)
           })
         }
       }
@@ -593,6 +658,7 @@ export class Carousel {
   /** @param {1 | -1} direction */
   #navigateRelative(direction) {
     if (this.#destroyed) return
+    if (this.#focusRequest) this.#focusRequest.cancelled = true
     // Insertion/removal can change the preserved slide's logical index before
     // render callbacks run. Resolve relative targets after that rebuild settles.
     if (this.#rebuilding) {
@@ -615,8 +681,9 @@ export class Carousel {
    * @param {1 | -1 | undefined} [direction]
    * @param {number | undefined} [fromIndex]
    * @param {number | undefined} [startPosition] raw position at gesture start
+   * @param {number | undefined} [durationOverride] immediate focus navigation
    */
-  #navigate(index, direction, fromIndex, startPosition) {
+  #navigate(index, direction, fromIndex, startPosition, durationOverride) {
     if (this.#destroyed) return
     if (!Number.isInteger(index)) throw new TypeError('Carousel: index must be an integer')
     if (fromIndex !== undefined && !Number.isInteger(fromIndex)) {
@@ -625,8 +692,9 @@ export class Carousel {
     if (startPosition !== undefined && !Number.isFinite(startPosition)) {
       throw new TypeError('Carousel: gesture startPosition must be finite')
     }
+    if (this.#focusRequest) this.#focusRequest.cancelled = true
     if (this.#notifying) {
-      this.#queuedNavigation = { index, direction, fromIndex, startPosition }
+      this.#queuedNavigation = { index, direction, fromIndex, startPosition, durationOverride }
       return
     }
     // A newer direct request also supersedes queued work when it is a no-op.
@@ -660,7 +728,7 @@ export class Carousel {
         ? this.#position + this.#loop.shortestDelta(this.#position, index)
         : Math.min(index, Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1))) * this.#step()
       if (Math.abs(targetPos - this.#position) > 0.01) {
-        this.#animateSnapBack(targetPos, this.#duration())
+        this.#animateSnapBack(targetPos, durationOverride ?? this.#duration())
       }
       return
     }
@@ -690,7 +758,7 @@ export class Carousel {
           Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1)) * this.#step(),
         )
 
-    const duration = this.#duration()
+    const duration = durationOverride ?? this.#duration()
     this.#selectedIndex = index
     if (isViewportTransition(this.#resolvedOptions.transition)) {
       this.#performViewportTransition(targetPos, duration)
@@ -1042,6 +1110,7 @@ export class Carousel {
         Object.entries(nextOptions.breakpoints).map(([width, override]) => [width, { ...override }]),
       )
     }
+    if (this.#focusRequest) this.#focusRequest.cancelled = true
     this.#breakpointManager.updateBase(nextOptions)
     try {
       this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
@@ -1082,6 +1151,9 @@ export class Carousel {
   destroy() {
     if (this.#destroyed) return
     this.#destroyed = true
+    this.#focusRequest = null
+    this.#trackRenderer.getViewport()?.removeEventListener('focusin', this.#focusHandler, true)
+    this.#focusHandler = null
     this.#stopAllAnimations()
 
     this.#events.emit('destroy')

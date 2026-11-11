@@ -315,6 +315,8 @@ Rendering and lazy-load failures are isolated to the affected slide. After const
 
 Use `createArrows({ hideOnIdle: true })` to slide arrows out towards their respective edges when the pointer leaves the slide viewport. Hover or visible keyboard focus reveals them again. Controls stay visible on touch and mixed-input devices; reduced motion is respected. The default is `false`. [Try the hover-reveal demo](https://shelamkoff.github.io/carousel/#hover-arrows-example).
 
+Tabbing or focusing a control in an off-screen slide brings that slide into view immediately, keeping the logical index, native scroll and rendered position synchronized. Live inputs, values, listeners and Shadow DOM are preserved. Focusing an already-visible control keeps the current multi-slide page. This behavior is part of the core and does not require the keyboard plugin.
+
 Install a plugin in `plugins` or with `use()` before destroying the carousel. A stateful plugin instance may belong to only one live carousel; create a fresh plugin object for every concurrent carousel.
 
 ## Creating a plugin

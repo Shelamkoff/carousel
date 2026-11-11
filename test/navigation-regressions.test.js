@@ -1673,3 +1673,205 @@ test('custom transition factories can queue navigation without replacing an unpu
     carousel.destroy()
   }
 })
+
+// These fixtures supply only the geometry needed to enter the focus controller.
+// Actual Tab ordering, clipping and native focus-scroll live in the browser spec.
+function focusSlideControl(mounted, index, { left = 1000, width = 40, scope = document } = {}) {
+  const { viewport, track } = mounted
+  const slide = track.children[index]
+  const control = new Element('input')
+  control.value = 'retained input'
+  control.ownerDocument = document
+  control.getRootNode = () => scope
+  control.getBoundingClientRect = () => ({ left, right: left + width, width })
+  viewport.getBoundingClientRect = () => ({ left: 0, right: viewport.offsetWidth, width: viewport.offsetWidth })
+  slide.appendChild(control)
+  scope.activeElement = control
+  viewport.dispatchEvent({
+    type: 'focusin', target: control,
+    composedPath: () => [control, slide, track, viewport],
+  })
+  // The browser can perform its focus-scroll after firing focusin.
+  viewport.scrollLeft = 216
+  return control
+}
+
+test('offscreen focus navigates immediately through normal events without changing configured animation', async () => {
+  const probe = { name: 'focus-probe', install(ctx) { this.ctx = ctx } }
+  let created = 0
+  let cleaned = 0
+  const transition = { name: 'focus-animation', create() {
+    created++
+    return { render() {}, destroy() { cleaned++ } }
+  } }
+  const mounted = mount(100, 4, { transition, transitionDuration: 1000, plugins: [probe] })
+  const { carousel, viewport, track } = mounted
+  const { events } = observeTransitionLifecycle(carousel)
+  try {
+    const control = focusSlideControl(mounted, 2)
+    let clicks = 0
+    control.addEventListener('click', () => clicks++)
+    assert.equal(carousel.getIndex(), 0)
+    await Promise.resolve()
+    assert.equal(carousel.getIndex(), 2)
+    assert.equal(probe.ctx.getPosition(), 200)
+    assert.equal(viewport.scrollLeft, 0)
+    assert.equal(track.children[2].children[0], control)
+    assert.equal(control.value, 'retained input')
+    assert.equal(document.activeElement, control)
+    control.dispatchEvent({ type: 'click' })
+    assert.equal(clicks, 1)
+    assert.deepEqual(events, ['start:2', 'end:2', 'change:0:2'])
+    assert.equal(probe.ctx.options.transitionDuration, 1000)
+    assert.equal(created, 0, 'focus must not hide the target behind a decorative effect')
+    carousel.next()
+    assert.equal(created, 1, 'subsequent ordinary navigation keeps its configured effect')
+  } finally {
+    carousel.destroy()
+    document.activeElement = document.body
+  }
+  assert.equal(cleaned, 1)
+})
+
+test('focus on visible fractional or oversized controls keeps the current page', async () => {
+  const mounted = mount(300, 6, { loop: true, slidesPerView: 2.5, startIndex: 4 })
+  try {
+    focusSlideControl(mounted, 0, { left: 250 })
+    await Promise.resolve()
+    assert.equal(mounted.carousel.getIndex(), 4)
+    assert.equal(mounted.viewport.scrollLeft, 0)
+    focusSlideControl(mounted, 0, { left: -25, width: 400 })
+    await Promise.resolve()
+    assert.equal(mounted.carousel.getIndex(), 4)
+    assert.equal(mounted.viewport.scrollLeft, 0)
+  } finally {
+    mounted.carousel.destroy()
+    document.activeElement = document.body
+  }
+})
+
+test('queued focus follows the same original slide through a collection rebuild', async () => {
+  const mounted = mount(100, 4, { transitionDuration: 700 })
+  try {
+    const control = focusSlideControl(mounted, 1)
+    const originalSlide = control.parentNode
+    mounted.carousel.addSlide({ content: 'Inserted before the current slide' }, 0)
+    await Promise.resolve()
+    assert.equal(mounted.carousel.getIndex(), 2)
+    assert.equal(mounted.track.children[2], originalSlide)
+    assert.equal(originalSlide.children[0], control)
+    assert.equal(mounted.viewport.scrollLeft, 0)
+  } finally {
+    mounted.carousel.destroy()
+    document.activeElement = document.body
+  }
+})
+
+for (const action of ['destroy', 'remove', 'focus elsewhere']) {
+  test(`queued focus is discarded after ${action}`, async () => {
+    const mounted = mount(100, 4)
+    const events = []
+    mounted.carousel.on('transition:start', () => events.push('navigation'))
+    try {
+      const control = focusSlideControl(mounted, 2)
+      let reads = 0
+      control.getBoundingClientRect = () => { reads++; return { left: 1000, right: 1040, width: 40 } }
+      if (action === 'destroy') mounted.carousel.destroy()
+      else if (action === 'remove') mounted.carousel.removeSlide(2)
+      else document.activeElement = document.body
+      await Promise.resolve()
+      assert.equal(reads, 0)
+      assert.deepEqual(events, [])
+    } finally {
+      mounted.carousel.destroy()
+      document.activeElement = document.body
+    }
+  })
+}
+
+test('focus cancels a loop custom transition and retires its completion before opening the input', async () => {
+  const pending = clock.frames.size
+  let cleaned = 0
+  const transition = { name: 'focus-cancellation', create() {
+    return { render() {}, destroy() { cleaned++ } }
+  } }
+  const mounted = mount(100, 4, { loop: true, transition, transitionDuration: 1000 })
+  const { events } = observeTransitionLifecycle(mounted.carousel)
+  try {
+    mounted.carousel.goTo(1)
+    frame(100)
+    focusSlideControl(mounted, 3)
+    await Promise.resolve()
+    frame(2000)
+    assert.equal(mounted.carousel.getIndex(), 3)
+    assert.equal(cleaned, 1)
+    assert.equal(mounted.viewport.querySelector('.carousel__transition'), null)
+    assert.deepEqual(events, ['start:1', 'start:3', 'end:3', 'change:0:3'])
+    assert.equal(clock.frames.size, pending)
+  } finally {
+    mounted.carousel.destroy()
+    document.activeElement = document.body
+  }
+})
+
+test('focus consumes a deferred resize before settling the focused logical slide', async () => {
+  const probe = { name: 'focus-resize-probe', install(ctx) { this.ctx = ctx } }
+  const mounted = mount(100, 5, { transitionDuration: 1000, plugins: [probe] })
+  try {
+    mounted.carousel.goTo(3)
+    frame(30)
+    mounted.host.width = 200
+    ResizeObserver.flush()
+    frame(16)
+    focusSlideControl(mounted, 4)
+    await Promise.resolve()
+    assert.equal(probe.ctx.getStep(), 200)
+    assert.equal(probe.ctx.getPosition(), 800)
+    assert.equal(mounted.carousel.getIndex(), 4)
+    assert.equal(mounted.viewport.scrollLeft, 0)
+  } finally {
+    mounted.carousel.destroy()
+    document.activeElement = document.body
+  }
+})
+
+test('focus cancellation cleanup can replace the layout without an obsolete focus navigation', async () => {
+  let carousel
+  const transition = { name: 'focus-cleanup-reentry', create() {
+    return { render() {}, destroy() { carousel.update({ gap: 20, transition: 'slide', transitionDuration: 0 }); carousel.goTo(0) } }
+  } }
+  const mounted = mount(100, 4, { transition, transitionDuration: 1000 })
+  carousel = mounted.carousel
+  const { events } = observeTransitionLifecycle(carousel)
+  try {
+    carousel.goTo(1)
+    focusSlideControl(mounted, 3)
+    await Promise.resolve()
+    await Promise.resolve()
+    assert.equal(carousel.getIndex(), 0)
+    assert.deepEqual(events, ['start:1'])
+  } finally {
+    carousel.destroy()
+    document.activeElement = document.body
+  }
+})
+
+for (const action of ['goTo current', 'goTo another', 'next', 'update']) {
+  test(`a newer ${action} supersedes queued focus while still resetting native scroll`, async () => {
+    const mounted = mount(100, 4, { transitionDuration: 0 })
+    try {
+      focusSlideControl(mounted, 2)
+      if (action === 'goTo current') mounted.carousel.goTo(0)
+      else if (action === 'goTo another') mounted.carousel.goTo(3)
+      else if (action === 'next') mounted.carousel.next()
+      else mounted.carousel.update({ gap: 12 })
+      await Promise.resolve()
+      const expected = action === 'goTo another' ? 3 : action === 'next' ? 1 : 0
+      assert.equal(mounted.carousel.getIndex(), expected)
+      assert.equal(mounted.viewport.scrollLeft, 0)
+    } finally {
+      mounted.carousel.destroy()
+      document.activeElement = document.body
+    }
+  })
+}
