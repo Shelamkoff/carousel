@@ -417,28 +417,47 @@ export class Carousel {
 
   #createPluginContext() {
     const subscriptions = new Set()
-    const trackSubscription = (unsubscribe) => {
+    const onSubscriptions = new Map()
+    let closed = false
+
+    // EventBus may already have snapshotted a callback when it is removed.
+    // Owned callbacks stay inert after unsubscribe or context cleanup, and
+    // a retired context cannot register new work after its owner is gone.
+    const subscribe = (ev, fn, once = false) => {
+      if (typeof fn !== 'function') throw new TypeError('Carousel: event handler must be a function')
+      if (closed) return () => {}
+      const existing = !once && onSubscriptions.get(ev)?.get(fn)
+      if (existing) return existing
+
       let active = true
-      const tracked = () => {
+      const unsubscribe = () => {
         if (!active) return
         active = false
-        subscriptions.delete(tracked)
-        unsubscribe()
+        subscriptions.delete(unsubscribe)
+        if (!once) {
+          const handlers = onSubscriptions.get(ev)
+          handlers?.delete(fn)
+          if (!handlers?.size) onSubscriptions.delete(ev)
+        }
+        remove()
       }
-      subscriptions.add(tracked)
-      return tracked
+      const remove = this.#events.on(ev, (...args) => {
+        if (!active || closed) return
+        // Remove before dispatch so nested emissions cannot repeat a once
+        // callback or retain its subscription in a long-lived plugin.
+        if (once) unsubscribe()
+        return fn(...args)
+      })
+      subscriptions.add(unsubscribe)
+      if (!once) {
+        if (!onSubscriptions.has(ev)) onSubscriptions.set(ev, new Map())
+        onSubscriptions.get(ev).set(fn, unsubscribe)
+      }
+      return unsubscribe
     }
     const context = Object.freeze({
-      on: (ev, fn) => trackSubscription(this.#events.on(ev, fn)),
-      once: (ev, fn) => {
-        if (typeof fn !== 'function') throw new TypeError('Carousel: event handler must be a function')
-        const unsubscribe = trackSubscription(this.once(ev, (...args) => {
-          // Do not retain completed once handlers in a long-lived plugin.
-          unsubscribe()
-          return fn(...args)
-        }))
-        return unsubscribe
-      },
+      on: (ev, fn) => subscribe(ev, fn),
+      once: (ev, fn) => subscribe(ev, fn, true),
       emit: (ev, ...args) => this.#events.emit(ev, ...args),
 
       next: () => this.next(),
@@ -519,6 +538,7 @@ export class Carousel {
     return {
       context,
       cleanup: () => {
+        closed = true
         for (const unsubscribe of [...subscriptions]) unsubscribe()
       },
     }
