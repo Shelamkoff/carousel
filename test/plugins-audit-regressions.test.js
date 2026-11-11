@@ -277,6 +277,56 @@ test('autoplay stops on the final real slide when slidesPerView is below one', a
   }
 })
 
+test('autoplay cannot be restarted from its stop event during teardown', t => {
+  const timers = new Set()
+  t.mock.method(globalThis, 'setTimeout', callback => { timers.add(callback); return callback })
+  t.mock.method(globalThis, 'clearTimeout', callback => timers.delete(callback))
+  const plugin = createAutoplay({ pauseOnHover: false })
+  const context = navigationContext(null)
+  let stops = 0
+  context.on('autoplay:stop', () => { stops++; plugin.start() })
+  try {
+    plugin.install(context)
+    assert.equal(timers.size, 1)
+    plugin.destroy()
+    assert.equal(stops, 1, 'destroy preserves the existing stop notification')
+    assert.equal(plugin.isActive(), false)
+    assert.equal(timers.size, 0)
+    plugin.start()
+    assert.equal(timers.size, 0, 'a retired plugin must not schedule new work')
+    plugin.install(navigationContext(null))
+    assert.equal(plugin.isActive(), true, 'an installed plugin remains reusable')
+    assert.equal(timers.size, 1)
+  } finally {
+    plugin.destroy()
+  }
+})
+
+test('autoplay waits for every held pointer and ignores unrelated pointer releases', t => {
+  const timers = new Set()
+  t.mock.method(globalThis, 'setTimeout', callback => { timers.add(callback); return callback })
+  t.mock.method(globalThis, 'clearTimeout', callback => timers.delete(callback))
+  const eventWindow = element()
+  const viewport = element()
+  viewport.ownerDocument = { defaultView: eventWindow }
+  const plugin = createAutoplay({ pauseOnHover: false, pauseOnInteraction: false })
+  try {
+    plugin.install(navigationContext(viewport))
+    viewport.dispatch({ type: 'pointerdown', pointerId: 1 })
+    assert.equal(timers.size, 0)
+    eventWindow.dispatch({ type: 'pointerup', pointerId: 99 })
+    assert.equal(timers.size, 0)
+    viewport.dispatch({ type: 'pointerdown', pointerId: 2 })
+    eventWindow.dispatch({ type: 'pointerup', pointerId: 2 })
+    assert.equal(timers.size, 0, 'the first pointer is still held')
+    eventWindow.dispatch({ type: 'pointercancel', pointerId: 1 })
+    assert.equal(timers.size, 1)
+    assert.equal(plugin.isActive(), true)
+  } finally {
+    plugin.destroy()
+  }
+})
+
 test('keyboard navigation respects consumed events and modifier shortcuts', () => {
   const root = element()
   let navigations = 0

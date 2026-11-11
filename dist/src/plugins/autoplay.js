@@ -14,11 +14,12 @@ export function createAutoplay(options = {}) {
   let ctx = null
   let unsubs = []
   let timer = null
+  let installed = false
   let active = false
   let paused = false
   let autoplayTriggered = false
   let autoNavigationStarted = false
-  let pointerHeld = false
+  const heldPointers = new Set()
   let onPointerDown = null
   let onPointerEnd = null
   let eventWindow = null
@@ -40,10 +41,10 @@ export function createAutoplay(options = {}) {
 
   function scheduleNext() {
     clearTimeout(timer)
-    if (!active || paused || pointerHeld) return
+    if (!installed || !active || paused || heldPointers.size > 0) return
     timer = setTimeout(() => {
       timer = null
-      if (!active || paused || pointerHeld) return
+      if (!installed || !active || paused || heldPointers.size > 0) return
       const count = ctx?.getSlideCount() ?? 0
       const maxIndex = getLastSlideIndex(count, ctx?.getSlidesPerView() ?? 1)
       if (count <= 1 || (!ctx?.isLoop() && (ctx?.getIndex() ?? 0) >= maxIndex)) {
@@ -70,6 +71,7 @@ export function createAutoplay(options = {}) {
 
     install(context) {
       ctx = context
+      installed = true
       const root = context.getRoot()
 
       if (pauseOnHover && root) {
@@ -86,18 +88,17 @@ export function createAutoplay(options = {}) {
       const viewport = context.getViewport?.()
       if (viewport) {
         eventWindow = viewport.ownerDocument?.defaultView ?? window
-        onPointerDown = () => {
+        onPointerDown = event => {
           if (pauseOnInteraction) {
             this.stop()
           } else {
-            pointerHeld = true
+            heldPointers.add(event.pointerId)
             clearTimeout(timer)
             timer = null
           }
         }
-        onPointerEnd = () => {
-          if (!pointerHeld) return
-          pointerHeld = false
+        onPointerEnd = event => {
+          if (!heldPointers.delete(event.pointerId) || heldPointers.size > 0) return
           if (active && !paused) scheduleNext()
         }
         viewport.addEventListener('pointerdown', onPointerDown)
@@ -123,6 +124,8 @@ export function createAutoplay(options = {}) {
     },
 
     destroy() {
+      // Keep the stop notification, but do not allow it to restart retired work.
+      installed = false
       this.stop()
       unsubs.forEach(fn => fn())
       unsubs = []
@@ -138,7 +141,7 @@ export function createAutoplay(options = {}) {
         eventWindow?.removeEventListener('pointercancel', onPointerEnd)
       }
       eventWindow = null
-      pointerHeld = false
+      heldPointers.clear()
       onPointerDown = null
       onPointerEnd = null
       onEnter = null
@@ -147,6 +150,7 @@ export function createAutoplay(options = {}) {
     },
 
     start() {
+      if (!installed) return
       if (active) {
         if (ctx && !paused && timer === null) scheduleNext()
         return
