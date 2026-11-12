@@ -593,7 +593,7 @@ export class Carousel {
       getViewport: () => this.#trackRenderer.getViewport(),
       getTrack: () => this.#trackRenderer.getTrack(),
       getSlideElements: () => [...this.#trackRenderer.getSlideElements()],
-      getVisualElements: () => this.#trackRenderer.getPositionElements(),
+      getVisualElements: () => [...this.#trackRenderer.getPositionElements()],
       getSlideElement: (i) => this.#trackRenderer.getSlideElement(i),
       renderSlide: (i) => {
         const slide = this.#slideManager.getSlide(i)

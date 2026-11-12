@@ -253,6 +253,23 @@ test('a retired plugin context cannot register new event work after cleanup', t 
   unsubscribe()
 })
 
+test('plugin visual element arrays cannot mutate the internal slide mapping', t => {
+  const { carousel } = mount(t)
+  let context
+  carousel.use({ name: 'visual-array-consumer', install(value) { context = value } })
+  const originals = carousel.getSlideElements()
+  const visual = context.getVisualElements()
+
+  visual.reverse()
+  assert.ok(carousel.getSlideElement(0) === originals[0],
+    'sorting a visual element list must not reorder the internal mapping')
+  visual.length = 0
+  assert.equal(carousel.getSlideElements().length, originals.length)
+  carousel.updateSlide(0, { meta: { revised: true } })
+  assert.ok(carousel.getSlideElement(0) === originals[0],
+    'a metadata update must retain the original content owner')
+})
+
 test('autoplay teardown notifies application listeners and plugins whose scope is still live', t => {
   const stops = { application: 0, plugin: 0 }
   const observer = {
