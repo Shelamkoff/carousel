@@ -136,13 +136,13 @@ test('surface copies of form-associated custom controls cannot invalidate the or
     try {
       owner.initialize()
       return { originalWillValidate: original.internals.willValidate,
-        copyWillValidate: context.from.querySelector('surface-custom-field').internals.willValidate,
+        customCopies: context.from.querySelectorAll('surface-custom-field,surface-custom-decoration').length,
         formValid: form.checkValidity(), values: [...new FormData(form)],
-        decorationDisabled: context.from.querySelector('surface-custom-decoration').hasAttribute('disabled') }
+        nativeCopies: [...context.from.querySelectorAll('[data-carousel-snapshot=custom-element]')].every(node => node.localName === 'span') }
     } finally { owner.destroy() }
   })
-  expect(result).toEqual({ originalWillValidate: true, copyWillValidate: false, formValid: true,
-    values: [['custom', 'valid original']], decorationDisabled: false })
+  expect(result).toEqual({ originalWillValidate: true, customCopies: 0, formValid: true,
+    values: [['custom', 'valid original']], nativeCopies: true })
 })
 
 test('custom controls defined after snapshot capture cannot invalidate the live form', async ({ page }) => {
@@ -161,8 +161,8 @@ test('custom controls defined after snapshot capture cannot invalidate the live 
       fromIndex: 0, toIndex: 1, direction: 1, orientation: 'horizontal', viewportSize: 400 })
     try {
       owner.initialize()
-      const copy = context.from.querySelector('late-surface-field')
-      const disabledBeforeUpgrade = copy.hasAttribute('disabled')
+      const copy = context.from.querySelector('[data-carousel-snapshot=custom-element]')
+      const nativeBeforeUpgrade = copy.localName === 'span'
       customElements.define('late-surface-field', class extends HTMLElement {
         static formAssociated = true
         constructor() {
@@ -177,17 +177,17 @@ test('custom controls defined after snapshot capture cannot invalidate the live 
       })
       const invalidOriginal = form.checkValidity()
       original.value = 'Updated original'
-      return { disabledBeforeUpgrade, originalWillValidate: original.internals.willValidate,
-        copyWillValidate: copy.internals.willValidate, invalidOriginal,
+      return { nativeBeforeUpgrade, originalWillValidate: original.internals.willValidate,
+        copyIsNative: copy.localName === 'span' && !('internals' in copy), invalidOriginal,
         validOriginal: form.checkValidity(), values: [...new FormData(form)] }
     } finally { owner.destroy() }
   })
-  expect(result).toEqual({ disabledBeforeUpgrade: true, originalWillValidate: true,
-    copyWillValidate: false, invalidOriginal: false, validOriginal: true,
+  expect(result).toEqual({ nativeBeforeUpgrade: true, originalWillValidate: true,
+    copyIsNative: true, invalidOriginal: false, validOriginal: true,
     values: [['field', 'Updated original']] })
 })
 
-test('snapshot connection can cancel its owner before the factory runs', async ({ page }) => {
+test('decorative snapshots never run custom connection callbacks', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const { SurfaceTransition } = await import('/src/transitions/SurfaceTransition.js')
     let owner
@@ -212,7 +212,7 @@ test('snapshot connection can cancel its owner before the factory runs', async (
     return { created, snapshotsConnected, originalRetained: track.contains(original),
       overlays: viewport.querySelectorAll('.carousel__transition').length, visibility: track.style.visibility }
   })
-  expect(result).toEqual({ created: 0, snapshotsConnected: 1, originalRetained: true, overlays: 0, visibility: '' })
+  expect(result).toEqual({ created: 1, snapshotsConnected: 0, originalRetained: true, overlays: 0, visibility: '' })
 })
 
 for (const method of ['createSurfaces', 'render', 'destroy']) {

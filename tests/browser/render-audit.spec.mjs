@@ -150,7 +150,7 @@ test('lazy rendering reports cancellation when its factory removes the slide', a
 
 for (const phase of ['disconnect', 'connect', 'lazy-connect']) {
   for (const action of ['destroy', 'update']) {
-    test(`visual copy ${phase} callbacks can ${action} without resuming obsolete work`, async ({ page }) => {
+    test(`visual copy ${phase} never runs application ${action} callbacks`, async ({ page }) => {
       const errors = []
       page.on('pageerror', error => errors.push(error.message))
       const result = await page.evaluate(async ({ phase, action }) => {
@@ -197,12 +197,12 @@ for (const phase of ['disconnect', 'connect', 'lazy-connect']) {
         host.remove()
         return snapshot
       }, { phase, action })
-      expect(result.callbacks).toBe(1)
+      expect(result.callbacks).toBe(0)
       expect(result.error).toBeNull()
-      expect(result.rendered).toBe(phase === 'lazy-connect' ? false : null)
-      expect(result.children).toBe(action === 'destroy' ? 0 : 1)
-      expect(result.copies).toBe(action === 'destroy' ? 0 : 3)
-      expect(result.widths).toEqual(action === 'destroy' ? [] : ['128px', '128px', '128px', '128px'])
+      expect(result.rendered).toBe(phase === 'lazy-connect' ? true : null)
+      expect(result.children).toBe(1)
+      expect(result.copies).toBe(2)
+      expect(result.widths).toEqual(Array(3).fill(phase === 'lazy-connect' ? '200px' : '198px'))
       expect(errors).toEqual([])
     })
   }

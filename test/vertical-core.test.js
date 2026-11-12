@@ -14,9 +14,12 @@ after(() => {
 class Element {
   constructor(tag = 'div') {
     this.tagName = tag.toUpperCase()
+    this.nodeType = 1
+    this.localName = tag.toLowerCase()
+    this.namespaceURI = 'http://www.w3.org/1999/xhtml'
     this.style = { touchAction: '', setProperty(name, value) { this[name] = value } }
     this.dataset = {}
-    this.attributes = new Map()
+    this.attributeValues = new Map()
     this.nodes = []
     this.parentNode = null
     this.width = null
@@ -34,6 +37,17 @@ class Element {
     }
   }
 
+  get attributes() {
+    const attributes = new Map(this.attributeValues)
+    attributes.set('class', this.className)
+    for (const [key, value] of Object.entries(this.dataset)) {
+      attributes.set(`data-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`, value)
+    }
+    return [...attributes].map(([name, value]) => ({ name, value, namespaceURI: null }))
+  }
+  hasAttribute(name) { return this.getAttribute(name) !== null }
+  get id() { return this.getAttribute('id') ?? '' }
+  set id(value) { this.setAttribute('id', value) }
   get className() { return [...this.classes].join(' ') }
   set className(value) { this.classes = new Set(value.split(' ').filter(Boolean)) }
   get childNodes() { return this.nodes }
@@ -51,9 +65,13 @@ class Element {
     return 20
   }
   get scrollHeight() { return 20 }
-  setAttribute(name, value) { this.attributes.set(name, String(value)) }
-  getAttribute(name) { return this.attributes.get(name) ?? null }
-  removeAttribute(name) { this.attributes.delete(name) }
+  setAttribute(name, value) {
+    this.attributeValues.set(name, String(value))
+    if (name === 'class') this.className = String(value)
+    if (name.startsWith('data-')) this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value)
+  }
+  getAttribute(name) { return this.attributeValues.get(name) ?? null }
+  removeAttribute(name) { this.attributeValues.delete(name) }
 
   insertBefore(node, reference) {
     node.remove()
@@ -87,7 +105,7 @@ class Element {
     node.style = { ...this.style }
     node.className = this.className
     node.dataset = { ...this.dataset }
-    node.attributes = new Map(this.attributes)
+    node.attributeValues = new Map(this.attributeValues)
     node.markup = this.markup
     if (deep) for (const child of this.nodes) node.appendChild(child.cloneNode(true))
     return node
@@ -136,7 +154,7 @@ view.matchMedia = query => {
   return item
 }
 globalThis.HTMLElement = Element
-globalThis.document = { createElement: tag => new Element(tag), querySelector: () => null }
+globalThis.document = { createElement: tag => new Element(tag), getElementById: () => null, querySelector: () => null }
 globalThis.window = view
 globalThis.performance = { now: () => clock.now }
 globalThis.requestAnimationFrame = callback => {

@@ -38,12 +38,12 @@ for (const lazy of [false, true]) {
         return card
       } }], { loop: true, transitionDuration: 0, plugins: lazy ? [createLazyLoad({ preload: 0 })] : [] })
       try {
-        const copy = form.querySelector('[data-carousel-copy] reconciled-form-field')
+        const copy = form.querySelector('[data-carousel-copy] [data-carousel-snapshot=custom-element]')
         return {
           originalValid: original.internals.checkValidity(),
           originalWillValidate: original.internals.willValidate,
           copyExists: !!copy,
-          copyWillValidate: copy.internals.willValidate,
+          copyIsNative: copy.localName === 'span' && !('internals' in copy),
           formValid: form.checkValidity(),
           values: [...new FormData(form)],
           decorationDisabled: [...form.querySelectorAll('reconciled-decoration')]
@@ -52,7 +52,7 @@ for (const lazy of [false, true]) {
       } finally { carousel.destroy(); form.remove() }
     }, lazy)
     expect(result).toEqual({ originalValid: true, originalWillValidate: true, copyExists: true,
-      copyWillValidate: false, formValid: true, values: [['field', 'Valid original']], decorationDisabled: false })
+      copyIsNative: true, formValid: true, values: [['field', 'Valid original']], decorationDisabled: false })
   })
 
   test(`late custom-control upgrades leave external form validation with the original (lazy ${lazy})`, async ({ page }) => {
@@ -68,8 +68,8 @@ for (const lazy of [false, true]) {
       }], { loop: true, transitionDuration: 0, plugins: lazy ? [createLazyLoad({ preload: 0 })] : [] })
       try {
         const original = carousel.getSlideElement(0).firstElementChild
-        const copy = host.querySelector('[data-carousel-copy] late-reconciled-field')
-        const disabledBeforeUpgrade = copy.hasAttribute('disabled')
+        const copy = host.querySelector('[data-carousel-copy] [data-carousel-snapshot=custom-element]')
+        const nativeBeforeUpgrade = copy.localName === 'span'
         customElements.define('late-reconciled-field', class extends HTMLElement {
           static formAssociated = true
           constructor() {
@@ -84,14 +84,14 @@ for (const lazy of [false, true]) {
         })
         const invalidOriginal = form.checkValidity()
         original.value = 'Updated original'
-        return { disabledBeforeUpgrade, originalWillValidate: original.internals.willValidate,
-          copyWillValidate: copy.internals.willValidate, invalidOriginal,
+        return { nativeBeforeUpgrade, originalWillValidate: original.internals.willValidate,
+          copyIsNative: copy.localName === 'span' && !('internals' in copy), invalidOriginal,
           validOriginal: form.checkValidity(), originalForm: original.internals.form === form,
           values: [...new FormData(form)] }
       } finally { carousel.destroy(); host.remove(); form.remove() }
     }, lazy)
-    expect(result).toEqual({ disabledBeforeUpgrade: true, originalWillValidate: true,
-      copyWillValidate: false, invalidOriginal: false, validOriginal: true,
+    expect(result).toEqual({ nativeBeforeUpgrade: true, originalWillValidate: true,
+      copyIsNative: true, invalidOriginal: false, validOriginal: true,
       originalForm: true, values: [['field', 'Updated original']] })
   })
 }

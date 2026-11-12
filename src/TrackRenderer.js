@@ -1,4 +1,5 @@
-import { moveElement, disableCopyControl } from './dom.js'
+import { moveElement } from './dom.js'
+import { createDecorativeSnapshot } from './createDecorativeSnapshot.js'
 import { SlideContent } from './SlideContent.js'
 import { resolveLayoutSlots } from './layouts.js'
 import { writeSlideProgress } from './renderState.js'
@@ -146,34 +147,15 @@ export class TrackRenderer {
     }
     for (let cycle = 1; cycle <= cycles; cycle++) {
       for (let i = 0; i < count; i++) {
-        const copy = /** @type {HTMLElement} */ (this.#slideElements[i].cloneNode(true))
-        if (this.#revision !== revision) return
+        const snapshot = createDecorativeSnapshot(this.#slideElements[i], () => this.#revision === revision)
+        if (!snapshot || this.#revision !== revision) return
+        const { element: copy } = snapshot
         copy.dataset.carouselCopy = String(cycle)
-        copy.setAttribute('aria-hidden', 'true')
-        copy.inert = true
-        this.#prepareCopy(copy)
-        if (this.#revision !== revision) return
         this.#copies.push(copy)
         this.#track.appendChild(copy)
         if (this.#revision !== revision) return
+        snapshot.restoreScroll()
       }
-    }
-  }
-
-  /**
-   * Visual replicas must not own IDs, radio groups, submitted form values or
-   * constraints. Inert only suppresses interaction, not form participation.
-   * Prepare the subtree before attachment so checked radios cannot uncheck
-   * the application-owned original while joining its form.
-   * @param {HTMLElement} copy
-   */
-  #prepareCopy(copy) {
-    const elements = [copy]
-    for (const element of elements) {
-      element.removeAttribute('id')
-      element.removeAttribute('name')
-      disableCopyControl(element)
-      elements.push(...element.children)
     }
   }
 
@@ -183,12 +165,15 @@ export class TrackRenderer {
     const original = this.#slideElements[index]
     for (const copy of this.#copies) {
       if (Number(copy.dataset.index) !== index) continue
-      const content = original.cloneNode(true)
+      const snapshot = createDecorativeSnapshot(original, () => this.#revision === revision)
+      if (!snapshot || this.#revision !== revision) return
+      copy.replaceChildren(...snapshot.element.childNodes)
       if (this.#revision !== revision) return
-      this.#prepareCopy(content)
-      if (this.#revision !== revision) return
-      copy.replaceChildren(...content.childNodes)
-      if (this.#revision !== revision) return
+      // Local references may target the slide wrapper itself. Keep their new
+      // namespace on the retained wrapper as well as its replacement children.
+      if (snapshot.element.id) copy.id = snapshot.element.id
+      else copy.removeAttribute('id')
+      snapshot.restoreScroll(copy)
       for (const name of ['rendered', 'loaded']) {
         if (original.dataset[name] === undefined) delete copy.dataset[name]
         else copy.dataset[name] = original.dataset[name]

@@ -9,11 +9,14 @@ import { createParallax } from '../src/plugins/parallax.js'
 class Element {
   constructor(tag = 'div') {
     this.tagName = tag.toUpperCase()
+    this.nodeType = 1
+    this.localName = tag.toLowerCase()
+    this.namespaceURI = 'http://www.w3.org/1999/xhtml'
     this.style = { setProperty(name, value) { this[name] = value } }
     this.dataset = {}
     this.children = []
     this.parentNode = null
-    this.attributes = new Map()
+    this.attributeValues = new Map()
     this.classes = new Set()
     this.classList = {
       add: (...values) => values.forEach(value => this.classes.add(value)),
@@ -25,6 +28,17 @@ class Element {
       },
     }
   }
+  get attributes() {
+    const attributes = new Map(this.attributeValues)
+    attributes.set('class', this.className)
+    for (const [key, value] of Object.entries(this.dataset)) {
+      attributes.set(`data-${key.replace(/[A-Z]/g, letter => `-${letter.toLowerCase()}`)}`, value)
+    }
+    return [...attributes].map(([name, value]) => ({ name, value, namespaceURI: null }))
+  }
+  hasAttribute(name) { return this.getAttribute(name) !== null }
+  get id() { return this.getAttribute('id') ?? '' }
+  set id(value) { this.setAttribute('id', value) }
   get className() { return [...this.classes].join(' ') }
   set className(value) { this.classes = new Set(value.split(' ').filter(Boolean)) }
   get childNodes() { return this.children }
@@ -36,9 +50,13 @@ class Element {
   get offsetWidth() { return 100 }
   get offsetHeight() { return 20 }
   get scrollHeight() { return 20 }
-  setAttribute(name, value) { this.attributes.set(name, String(value)) }
-  getAttribute(name) { return this.attributes.get(name) ?? null }
-  removeAttribute(name) { this.attributes.delete(name) }
+  setAttribute(name, value) {
+    this.attributeValues.set(name, String(value))
+    if (name === 'class') this.className = String(value)
+    if (name.startsWith('data-')) this.dataset[name.slice(5).replace(/-([a-z])/g, (_, letter) => letter.toUpperCase())] = String(value)
+  }
+  getAttribute(name) { return this.attributeValues.get(name) ?? null }
+  removeAttribute(name) { this.attributeValues.delete(name) }
   appendChild(node) { return this.insertBefore(node, null) }
   insertBefore(node, reference) {
     node.remove()
@@ -82,7 +100,7 @@ after(() => {
 })
 const clock = { now: 0, next: 0, frames: new Map() }
 globalThis.HTMLElement = Element
-globalThis.document = { createElement: tag => new Element(tag) }
+globalThis.document = { createElement: tag => new Element(tag), getElementById: () => null }
 globalThis.window = new Element('window')
 globalThis.window.matchMedia = () => ({ matches: false, addEventListener() {}, removeEventListener() {} })
 globalThis.ResizeObserver = class { observe() {} disconnect() {} }

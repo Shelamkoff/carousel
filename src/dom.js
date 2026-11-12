@@ -20,12 +20,6 @@ const formControls = new Set(['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'FIELDSET
 /** Inert copies must also stay outside form submission and constraint validation. */
 export function disableCopyControl(element) {
   if (formControls.has(element.tagName)) element.disabled = true
-  else if (element.constructor?.formAssociated === true
-    || element.tagName.includes('-') && isHTMLElement(element) && !element.matches(':defined')) {
-    // A custom element may upgrade after attachment. Its disabled state must
-    // already exist when a future form-associated constructor calls attachInternals.
-    element.setAttribute('disabled', '')
-  }
 }
 
 /** Prefer atomic DOM moves. The fallback preserves focused controls where possible. */
