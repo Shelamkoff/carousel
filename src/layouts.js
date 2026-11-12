@@ -1,4 +1,5 @@
 import { getExpandGeometry, getExpandSlot, getExpandVirtualIndex } from './expand.js'
+import { synchronous } from './synchronous.js'
 
 export function isCarouselLayout(layout) {
   return layout === 'standard' || layout === 'expand' || !!(layout
@@ -22,11 +23,7 @@ export function resolveLayoutSlots(layout, context, options) {
   const input = Object.freeze({ ...context,
     slides: Object.freeze(context.slides.map(slide => Object.freeze({ ...slide }))),
   })
-  const output = layout.render(input)
-  if (output && typeof output.then === 'function') {
-    Promise.resolve(output).catch(() => {})
-    throw new TypeError('Carousel: layout render() must be synchronous')
-  }
+  const output = synchronous(layout.render(input), 'layout render()')
   if (!Array.isArray(output) || output.length !== input.slides.length) {
     throw new TypeError('Carousel: layout must return one geometry record per visual slide')
   }

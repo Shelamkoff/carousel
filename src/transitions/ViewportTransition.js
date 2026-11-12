@@ -1,4 +1,5 @@
 import { viewportTransitionPresets } from './presets.js'
+import { synchronous } from '../synchronous.js'
 
 export { getPanelCount, getPanelState } from './presets.js'
 
@@ -47,14 +48,14 @@ export class ViewportTransition {
     // Initialization is synchronous; render(0) runs before the next paint.
     this.#viewport.appendChild(this.#overlay)
     if (this.#destroyed) return
-    const instance = this.#definition.create(Object.freeze({
+    const instance = synchronous(this.#definition.create(Object.freeze({
       container: this.#overlay,
       direction: this.#direction,
-    }))
+    })), 'transition create()')
     // A factory can synchronously update/destroy the carousel before returning
     // its resources. Its late result must still be disposed exactly once.
     if (this.#destroyed) {
-      if (typeof instance?.destroy === 'function') instance.destroy()
+      if (typeof instance?.destroy === 'function') synchronous(instance.destroy(), 'transition destroy()')
       return
     }
     this.#instance = instance
@@ -66,7 +67,7 @@ export class ViewportTransition {
   }
 
   render(progress) {
-    if (!this.#destroyed) this.#instance.render(progress)
+    if (!this.#destroyed) synchronous(this.#instance.render(progress), 'transition render()')
   }
 
   destroy() {
@@ -78,7 +79,7 @@ export class ViewportTransition {
     this.#overlay = null
     this.#viewport = null
     try {
-      if (typeof instance?.destroy === 'function') instance.destroy()
+      if (typeof instance?.destroy === 'function') synchronous(instance.destroy(), 'transition destroy()')
     } finally {
       overlay?.remove()
     }

@@ -1,12 +1,5 @@
 import { StyleLedger } from './StyleLedger.js'
-
-function synchronous(value, label) {
-  if (value && typeof value.then === 'function') {
-    Promise.resolve(value).catch(() => {})
-    throw new TypeError(`Carousel: effect ${label} must be synchronous`)
-  }
-  return value
-}
+import { synchronous } from '../synchronous.js'
 
 /** Adapt a visual effect to the existing plugin ownership and core frame clock. */
 export function createSlideEffect(definition) {
@@ -36,7 +29,7 @@ export function createSlideEffect(definition) {
     const unsubs = unsubscribers
     unsubscribers = []
     for (const unsubscribe of unsubs) unsubscribe()
-    try { synchronous(retired?.destroy?.(), 'destroy()') }
+    try { synchronous(retired?.destroy?.(), 'effect destroy()') }
     finally { styles.clear() }
   }
 
@@ -59,7 +52,7 @@ export function createSlideEffect(definition) {
     rendering = true
     const previous = renderingVersion
     renderingVersion = version
-    try { synchronous(active.render(state), 'render()') }
+    try { synchronous(active.render(state), 'effect render()') }
     catch (error) {
       // A render may uninstall and reinstall this plugin before throwing.
       // Its obsolete failure must not tear down the replacement instance.
@@ -114,7 +107,7 @@ export function createSlideEffect(definition) {
         styles.set(element, property, value)
       }
       try {
-        const created = synchronous(definition.create(Object.freeze({ root, viewport, setStyle })), 'create()')
+        const created = synchronous(definition.create(Object.freeze({ root, viewport, setStyle })), 'effect create()')
         instance = created
         if (!created || typeof created.render !== 'function'
           || created.destroy !== undefined && typeof created.destroy !== 'function') {
