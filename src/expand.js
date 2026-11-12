@@ -33,11 +33,21 @@ export function getExpandSlot(geometry, virtualIndex) {
   return { offset, size: compact + growth * focus, focus }
 }
 
-/** Keep the actual interactive original closest to the current focus. */
-export function getExpandVirtualIndex(index, position, count, copy = 0) {
+/** First slot whose trailing edge has not cleared the leading viewport edge. */
+export function getExpandLoopStart({ anchor, anchorIndex, compact, gap }) {
+  const step = compact + gap
+  if (step <= 0) return anchorIndex
+  const firstCompactSlot = Math.floor((-anchor - compact) / step) + 1
+  return anchorIndex + Math.min(0, firstCompactSlot)
+}
+
+/** Wrap offscreen slots and keep the original closest to the active card. */
+export function getExpandVirtualIndex(index, position, count, first, copy = 0) {
   if (count <= 0) return index
+  const firstOccurrence = index + Math.ceil((first - index) / count) * count
   const nearest = index + Math.round((position - index) / count) * count
-  if (!copy) return nearest
-  const direction = nearest > position ? -1 : 1
-  return nearest + direction * count * copy
+  const original = Math.max(firstOccurrence, nearest)
+  if (!copy) return original
+  const occurrence = firstOccurrence + (copy - 1) * count
+  return occurrence < original ? occurrence : occurrence + count
 }

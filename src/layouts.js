@@ -1,4 +1,4 @@
-import { getExpandGeometry, getExpandSlot, getExpandVirtualIndex } from './expand.js'
+import { getExpandGeometry, getExpandLoopStart, getExpandSlot, getExpandVirtualIndex } from './expand.js'
 import { synchronous } from './synchronous.js'
 
 export function isCarouselLayout(layout) {
@@ -22,9 +22,10 @@ export function resolveLayoutSlots(layout, context, options) {
     const position = context.logicalPosition ?? (context.step > 0 ? context.position / context.step : 0)
     const geometry = getExpandGeometry(position, context.viewportSize, options.slidesPerView,
       options.expandRatio, options.expandPeek, context.gap, context.count, context.loop)
+    const loopStart = context.loop ? getExpandLoopStart(geometry) : 0
     return context.slides.map(slide => {
       const virtual = context.loop
-        ? getExpandVirtualIndex(slide.index, position, context.count, slide.copy) : slide.index
+        ? getExpandVirtualIndex(slide.index, position, context.count, loopStart, slide.copy) : slide.index
       return { ...getExpandSlot(geometry, virtual), progress: virtual - position }
     })
   }
