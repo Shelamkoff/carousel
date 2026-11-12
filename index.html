@@ -71,6 +71,43 @@
     .transition-options a { color: #354791; text-underline-offset: 4px; font-size: .85rem; }
     #transition-description { margin-top: 8px; }
     #demo-transitions { --carousel-transition-color: #354791; }
+    #demo-expand {
+      --carousel-expand-height: 430px;
+      --carousel-expand-radius: 14px;
+      --carousel-expand-card-bg: #182d4d;
+      --carousel-expand-badge-bg: #e74678;
+      --carousel-play-bg: #fff;
+      --carousel-play-color: #12213c;
+      --carousel-play-border: none;
+      --carousel-progress-color: #ed4c89;
+      --carousel-progress-track: #fff;
+      --carousel-counter-color: #fff;
+      --carousel-control-duration: 170ms;
+      background: #20385e;
+      border-radius: 14px;
+      padding: 28px 0 12px;
+      overflow: hidden;
+    }
+    #demo-expand .carousel__viewport { border-radius: 0; }
+    #demo-expand .carousel__controls {
+      gap: 16px;
+      padding: 14px 24px 0;
+      color: #fff;
+    }
+    #demo-expand .carousel__autoplay-progress--bar {
+      flex: 1 1 auto;
+      width: auto;
+      min-width: 32px;
+      height: 8px;
+    }
+    #demo-expand .carousel__play-pause { width: 52px; height: 52px; }
+    #demo-expand .carousel__arrow { --carousel-arrow-bg: rgba(255,255,255,.96); }
+    #demo-expand .carousel__counter { font-variant-numeric: tabular-nums; }
+    @media (max-width: 520px) {
+      #demo-expand { --carousel-expand-height: 360px; --carousel-expand-inset: 14px; }
+      #demo-expand .carousel__controls { padding-inline: 14px; gap: 10px; }
+      #demo-expand .carousel__play-pause { width: 42px; height: 42px; }
+    }
     .effect-figure { margin: 0; background: #fff; border-radius: 8px; overflow: hidden; }
     .effect-figure img { display: block; width: 100%; height: auto; }
     .effect-figure figcaption { padding: 12px 20px; line-height: 1.5; }
@@ -347,6 +384,7 @@
       <a href="#gallery-example">Vertical &amp; fractional</a>
       <a href="#autoplay-example">Playback controls</a>
       <a href="#transitions-example">Transitions</a>
+      <a href="#expand-example">Expanding cards</a>
       <a href="#theming-example">Themes</a>
       <a href="#hover-arrows-example">Hover arrows</a>
       <a href="#height-example">Auto-height</a>
@@ -532,6 +570,25 @@
       <summary>Current options</summary>
       <pre><code id="gallery-options-code"></code></pre>
     </details>
+  </section>
+
+  <section class="demo-section" id="expand-example">
+    <h2>18. Expanding editorial cards</h2>
+    <p class="demo-note">Inspired by an editorial carousel: the focused card grows, surrounding previews contract, and each heading shifts and scales continuously. Drag, click a preview, or use the arrows. Try the settings to change its proportions.</p>
+    <div class="gallery-settings" role="group" aria-label="Expanding card settings">
+      <label>Card contrast
+        <select id="expand-ratio"><option value="1.6">Subtle</option><option value="2.6" selected>Balanced</option><option value="3.5">Dramatic</option></select>
+      </label>
+      <label>Preview count
+        <select id="expand-visible"><option value="1.8">1.8</option><option value="2.45" selected>2.45</option><option value="3.1">3.1</option></select>
+      </label>
+      <label>Direction
+        <select id="expand-orientation"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select>
+      </label>
+    </div>
+    <div id="demo-expand"></div>
+    <output id="expand-status" class="demo-status" aria-live="polite"></output>
+    <p class="demo-note">The navigation and caption motion share one timeline; Play/Pause, elapsed time, keyboard control and short loop replicas remain available.</p>
   </section>
 
   <script type="importmap">
@@ -1126,6 +1183,67 @@
       history.replaceState(null, '', url)
     })
     updateGallerySettings()
+
+    // ── Demo 18: expanding cards use the same position-driven animation ──
+    const expandStories = [
+      ['Beyond the Horizon', 'A visual journey through changing landscapes'],
+      ['A Different Perspective', 'Discover the shapes of modern design'],
+      ['Stories in Motion', 'A collection of textures and light'],
+      ['Quiet Explorations', 'New places and new ways to see'],
+      ['The Colour of Discovery', 'Unexpected ideas for creative people'],
+      ['The Last Summer', 'An invitation to explore what is next'],
+    ]
+    const expandSlides = expandStories.map(([title, description], index) => ({
+      content: `<article class="carousel__expand-card">
+        <img class="carousel__expand-image" src="./demo-assets/panel-${index + 1}.svg" alt="" width="800" height="400">
+        <span class="carousel__expand-badge">FEATURE</span>
+        <div class="carousel__expand-caption">
+          <h3 class="carousel__expand-title">${title}</h3>
+          <p class="carousel__expand-meta">${description}</p>
+        </div>
+        <span class="carousel__expand-footer">Explore story &rsaquo;</span>
+      </article>`,
+    }))
+    const expandHost = document.getElementById('demo-expand')
+    const expandControls = createControls({ position: 'below', progress: 'bar', counter: true, playPause: true })
+    const expandCarousel = new Carousel(expandHost, expandSlides, {
+      layout: 'expand',
+      expandVisible: 2.45,
+      expandRatio: 2.6,
+      expandPeek: 28,
+      gap: 16,
+      loop: true,
+      transitionDuration: 650,
+      ariaLabel: 'Expanding editorial cards',
+      plugins: [
+        createArrows(), createKeyboard(), createSwipe({ mouse: true }),
+        createAutoplay({ interval: 5500, pauseOnInteraction: false }), expandControls,
+      ],
+    })
+    function updateExpandStatus() {
+      document.getElementById('expand-status').textContent =
+        `Slide ${expandCarousel.getIndex() + 1} of ${expandSlides.length} · ${document.getElementById('expand-orientation').value} · expanding layout`
+    }
+    expandCarousel.on('slide:change', updateExpandStatus)
+    for (const id of ['expand-ratio', 'expand-visible', 'expand-orientation']) {
+      document.getElementById(id).addEventListener('change', () => {
+        expandCarousel.update({
+          expandRatio: Number(document.getElementById('expand-ratio').value),
+          expandVisible: Number(document.getElementById('expand-visible').value),
+          orientation: document.getElementById('expand-orientation').value,
+          viewportHeight: 430,
+        })
+        updateExpandStatus()
+      })
+    }
+    expandHost.addEventListener('click', event => {
+      if (!(event.target instanceof Element) || event.target.closest('button, a, input, select, textarea')) return
+      const slide = event.target.closest('.carousel__slide:not([data-carousel-copy])')
+      if (slide && Number(slide.dataset.index) !== expandCarousel.getIndex()) {
+        expandCarousel.goTo(Number(slide.dataset.index))
+      }
+    })
+    updateExpandStatus()
 
     document.body.dataset.status = 'pass'
   </script>

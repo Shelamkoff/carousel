@@ -101,6 +101,10 @@ interface SlideData {
 | `slidesPerView` | `number` | `1` | Number of visible slides; positive fractions such as `1.15` and `2.25` are supported. |
 | `slidesPerScroll` | `number \| 'auto'` | `1` | Navigation step. `'auto'` uses the resolved visible count. |
 | `orientation` | `'horizontal' \| 'vertical'` | `'horizontal'` | Navigation, layout, keyboard, swipe and parallax axis. |
+| `layout` | `'standard' \| 'expand'` | `'standard'` | Expanding cards with coordinated caption movement, or ordinary equal-width slides. |
+| `expandVisible` | `number` | `2.5` | Number of compact-card equivalents used by the expanding layout (fractions supported). |
+| `expandRatio` | `number` | `2.5` | Active-to-compact card size ratio; at least 1. |
+| `expandPeek` | `number` | `32` | Leading inset in pixels, limited to a quarter of the viewport. |
 | `viewportHeight` | `number` | CSS `400px` | Positive viewport height in CSS pixels, used only in vertical mode. Omit to use `--carousel-vertical-height`. |
 | `gap` | `number` | `0` | Gap between slides in CSS pixels. |
 | `transition` | `CarouselTransition` | `'slide'` | A built-in name or a custom transition definition. See transitions below. |
@@ -143,6 +147,32 @@ gallery.update({ slidesPerView: 2.25 })
 Vertical mode uses Up/Down keys, vertical dragging and top/bottom arrows. Cross-axis touch scrolling and pinch zoom remain available. A vertical gallery needs a bounded viewport: use `viewportHeight`, or omit it and set `--carousel-vertical-height: clamp(280px, 60vh, 520px)` on the host. The CSS fallback is `400px`. Horizontal mode keeps its content-driven height. Both options can be changed through `update()` or breakpoints; breakpoint thresholds still refer to window width. All transition presets work with either orientation; mask designs such as `stairs-horizontal` retain their own visual direction.
 
 [Try fractional slides, vertical navigation and themed controls](https://shelamkoff.github.io/carousel/?orientation=vertical&slidesPerView=1.15#gallery-example).
+
+### Expanding editorial cards
+
+Set `layout: 'expand'` to display one prominent card and narrower adjacent previews. This is a **layout**, not an overlay transition: the same position-driven animation resizes the cards and exposes a continuous `--carousel-expand-focus` value (0…1) on each slide. The supplied CSS animates the caption, font size and supporting text when your card uses `carousel__expand-card`, `carousel__expand-image`, `carousel__expand-caption`, `carousel__expand-title` and `carousel__expand-meta` classes. Your own HTML and CSS can consume the focus variable instead.
+
+```js
+const carousel = new Carousel('#stories', storySlides, {
+  layout: 'expand',
+  slidesPerView: 1,       // exactly one logical active slide
+  expandVisible: 2.45,   // active card plus partial neighboring previews
+  expandRatio: 2.6,
+  expandPeek: 28,
+  gap: 16,
+  loop: true,
+  transitionDuration: 650,
+  plugins: [
+    createArrows(), createSwipe({ mouse: true }), createKeyboard(),
+    createAutoplay({ interval: 5500 }),
+    createControls({ progress: 'bar', playPause: true, counter: true }),
+  ],
+})
+```
+
+The layout keeps `slidesPerView: 1` so finite navigation, swipes, dots and the counter still refer to individual cards. Use `expandVisible` to set the visual preview count. `expandRatio` and `expandVisible` must be at least 1; `expandPeek` must be non-negative. `fade` cannot be combined with the expanding layout; positional `slide` and decorative cover presets are supported. Both orientations, responsive breakpoints, updates, short loops and reduced motion are supported. Set height with `--carousel-expand-height` in horizontal mode, and use `viewportHeight` for vertical mode. CSS theme tokens include `--carousel-expand-radius`, `--carousel-expand-inset`, `--carousel-expand-badge-bg`, `--carousel-expand-card-bg`, and `--carousel-expand-scrim`.
+
+[Try expanding cards in the live demo](https://shelamkoff.github.io/carousel/#expand-example).
 
 ### Playback controls, elapsed time and counter
 

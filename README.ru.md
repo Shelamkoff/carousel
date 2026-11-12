@@ -102,6 +102,10 @@ interface SlideData {
 | `slidesPerScroll` | `number \| 'auto'` | `1` | Шаг навигации. `'auto'` использует текущее количество видимых слайдов. |
 | `gap` | `number` | `0` | Расстояние между слайдами в CSS-пикселях. |
 | `orientation` | `'horizontal' \| 'vertical'` | `'horizontal'` | Ось раскладки, навигации, клавиатуры, свайпа и параллакса. |
+| `layout` | `'standard' \| 'expand'` | `'standard'` | Режим расширяющихся карточек с синхронной анимацией заголовка или обычная раскладка. |
+| `expandVisible` | `number` | `2.5` | Число эквивалентов узких карточек в расширяющейся раскладке; допускаются дробные значения. |
+| `expandRatio` | `number` | `2.5` | Отношение размеров активной и узкой карточки, не меньше 1. |
+| `expandPeek` | `number` | `32` | Ведущий отступ в пикселях, не более четверти видимой области. |
 | `viewportHeight` | `number` | CSS `400px` | Положительная высота вертикальной видимой области в CSS-пикселях. Без опции применяется `--carousel-vertical-height`. |
 | `transition` | `CarouselTransition` | `'slide'` | Имя встроенного эффекта или объект пользовательского перехода. См. раздел ниже. |
 | `transitionDuration` | `number` | `400` | Длительность перехода в миллисекундах. |
@@ -143,6 +147,32 @@ gallery.update({ slidesPerView: 2.25 })
 В вертикальном режиме используются клавиши Up/Down, вертикальный свайп и стрелки сверху/снизу. Сенсорная прокрутка по поперечной оси и масштабирование двумя пальцами сохраняются. Высоту можно задать через `viewportHeight` либо, без этой опции, через `--carousel-vertical-height: clamp(280px, 60vh, 520px)` на контейнере. CSS-значение по умолчанию — `400px`. Горизонтальная галерея по-прежнему получает высоту от содержимого. Направление и высота изменяются через `update()` и breakpoints; пороги breakpoints по-прежнему определяются шириной окна. Все пресеты переходов работают с обеими ориентациями. Рисунок масок, например `stairs-horizontal`, сохраняет собственное направление.
 
 [Открыть вертикальную галерею с `1.15` слайда](https://shelamkoff.github.io/carousel/?orientation=vertical&slidesPerView=1.15#gallery-example).
+
+### Расширяющиеся карточки
+
+`layout: 'expand'` создаёт акцентную карточку с узкими соседними превью, как в редакционной галерее. Это **тип раскладки**, а не декоративная маска: ширины карточек и позиция текста меняются по общему времени анимации. Каждая карточка получает непрерывную CSS-переменную `--carousel-expand-focus` от 0 до 1. Готовые стили управляют заголовком и подписью при использовании классов `carousel__expand-card`, `carousel__expand-image`, `carousel__expand-caption`, `carousel__expand-title`, `carousel__expand-meta`. Собственная разметка также может использовать эту переменную.
+
+```js
+const carousel = new Carousel('#stories', storySlides, {
+  layout: 'expand',
+  slidesPerView: 1,
+  expandVisible: 2.45,
+  expandRatio: 2.6,
+  expandPeek: 28,
+  gap: 16,
+  loop: true,
+  transitionDuration: 650,
+  plugins: [
+    createArrows(), createSwipe({ mouse: true }), createKeyboard(),
+    createAutoplay({ interval: 5500 }),
+    createControls({ progress: 'bar', playPause: true, counter: true }),
+  ],
+})
+```
+
+В этом режиме активен ровно один логический слайд (`slidesPerView: 1`), а `expandVisible` определяет долю видимых узких превью и допускает дробные значения. `expandRatio` и `expandVisible` должны быть не меньше 1, `expandPeek` — неотрицательным. Переход `fade` несовместим с этой раскладкой; `slide` и эффекты закрытия области доступны. Поддерживаются горизонтальное и вертикальное направления, breakpoints, обновления, короткие циклы, свайпы и режим уменьшения движения. Высота горизонтальной карточки задаётся через `--carousel-expand-height`, вертикальная высота — через `viewportHeight`. Темизация доступна через `--carousel-expand-radius`, `--carousel-expand-inset`, `--carousel-expand-badge-bg`, `--carousel-expand-card-bg` и `--carousel-expand-scrim`.
+
+[Открыть демо расширяющихся карточек](https://shelamkoff.github.io/carousel/#expand-example).
 
 ### Play/Pause, время показа и счётчик
 

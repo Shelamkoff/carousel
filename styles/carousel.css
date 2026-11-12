@@ -105,6 +105,7 @@
 
 .carousel--expand .carousel__expand-caption {
   right: var(--carousel-expand-inset, 22px);
+  bottom: var(--carousel-expand-caption-bottom, 76px);
   bottom: calc(var(--carousel-expand-caption-bottom, 76px) + var(--carousel-expand-focus, 0) * var(--carousel-expand-caption-lift, 38px));
   transform: translate3d(0, calc((1 - var(--carousel-expand-focus, 0)) * 8px), 0);
 }
@@ -112,6 +113,7 @@
 .carousel--expand .carousel__expand-title {
   margin: 0;
   color: inherit;
+  font-size: 18px;
   font-size: clamp(18px, calc(18px + var(--carousel-expand-focus, 0) * 10px), 30px);
   font-weight: 750;
   line-height: 1.16;
@@ -122,6 +124,7 @@
   margin: 9px 0 0;
   font-size: 12px;
   line-height: 1.4;
+  opacity: .55;
   opacity: calc(.55 + var(--carousel-expand-focus, 0) * .45);
   transform: translate3d(0, calc((1 - var(--carousel-expand-focus, 0)) * 8px), 0);
 }

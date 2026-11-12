@@ -163,3 +163,22 @@ test('the live demo reveals arrows over the slide and hides them after a mouse c
   await expect(status).toHaveText('Slide 1 of 3')
   expect(errors).toEqual([])
 })
+
+test('expanding editorial demo animates previews and exposes playback controls', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/#expand-example')
+  const region = page.getByRole('region', { name: 'Expanding editorial cards' })
+  await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+  await expect(region.locator('.carousel')).toHaveClass(/carousel--expand/)
+  await expect(region.locator('.carousel__expand-card')).toHaveCount(6)
+  await expect(region.getByRole('button', { name: 'Pause autoplay' })).toHaveCount(1)
+  await expect(region.locator('.carousel__autoplay-progress--bar')).toHaveCount(1)
+  await region.getByRole('button', { name: 'Next slide' }).click()
+  await expect(page.locator('#expand-status')).toContainText('Slide 2 of 6')
+  await page.getByLabel('Card contrast').selectOption('3.5')
+  await expect(region.locator('.carousel__slide').nth(1)).toHaveCSS('width', /px/)
+  await page.getByLabel('Direction').selectOption('vertical')
+  await expect(region.locator('.carousel')).toHaveClass(/carousel--vertical/)
+  expect(errors).toEqual([])
+})
