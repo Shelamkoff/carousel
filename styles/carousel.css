@@ -49,7 +49,8 @@
 /* ── Expanding / editorial cards ── */
 /* The core writes a continuous --carousel-expand-focus value (0..1) on
    each card, so captions move in sync with width, drag, and interruption. */
-.carousel--expand > .carousel__viewport > .carousel__track {
+.carousel--expand > .carousel__viewport > .carousel__track,
+.carousel--custom-layout > .carousel__viewport > .carousel__track {
   display: block;
   position: relative;
 }

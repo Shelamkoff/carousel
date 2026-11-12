@@ -14,3 +14,31 @@ export function isHTMLElement(value) {
     return false
   }
 }
+
+/** Prefer atomic DOM moves. The fallback preserves focused controls where possible. */
+export function moveElement(parent, node, before = null) {
+  let focused = node.ownerDocument?.activeElement
+  while (focused?.shadowRoot?.activeElement) focused = focused.shadowRoot.activeElement
+  const restoreFocus = focused && (node === focused || node.contains?.(focused))
+  const selection = restoreFocus && typeof focused.selectionStart === 'number'
+    ? { start: focused.selectionStart, end: focused.selectionEnd, direction: focused.selectionDirection,
+        value: focused.value, type: focused.type } : null
+  if (typeof parent.moveBefore === 'function' && node.parentNode
+    && node.ownerDocument === parent.ownerDocument && node.isConnected === parent.isConnected) {
+    parent.moveBefore(node, before)
+  } else {
+    parent.insertBefore(node, before)
+  }
+  if (!restoreFocus || !focused.isConnected) return
+  const root = focused.getRootNode?.() ?? focused.ownerDocument
+  if (root.activeElement !== focused && focused.ownerDocument.activeElement === focused.ownerDocument.body) {
+    focused.focus({ preventScroll: true })
+  }
+  // Even atomic reparenting can reset text selection in native form controls.
+  // Do not override content or focus deliberately changed by a DOM callback.
+  if (selection && root.activeElement === focused && focused.value === selection.value
+    && focused.type === selection.type && (focused.selectionStart !== selection.start
+      || focused.selectionEnd !== selection.end || focused.selectionDirection !== selection.direction)) {
+    focused.setSelectionRange(selection.start, selection.end, selection.direction)
+  }
+}

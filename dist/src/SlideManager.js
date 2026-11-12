@@ -1,43 +1,75 @@
-/**
- * Manages slide data. Pure data, no loop/position logic.
- */
+import { validateSlide, validateSlides } from './slideData.js'
+
+/** Pure collection state. Opaque keys outlive immutable data updates. */
 export class SlideManager {
-  /** @type {import('./types').SlideData[]} */
-  #slides
+  #slides = []
+  #keys = []
 
-  /** @param {import('./types').SlideData[]} slides */
-  constructor(slides) {
-    if (!Array.isArray(slides)) throw new TypeError('SlideManager: slides must be an array')
-    this.#slides = [...slides]
-  }
-
-  /** @returns {import('./types').SlideData[]} */
+  constructor(slides) { this.setSlides(slides) }
   getSlides() { return [...this.#slides] }
-
-  /** @param {number} i @returns {import('./types').SlideData | null} */
   getSlide(i) { return this.#slides[i] ?? null }
-
-  /** @returns {number} */
   getSlideCount() { return this.#slides.length }
+  getKeys() { return [...this.#keys] }
+  getKey(index) { return this.#keys[index] }
+  indexOfKey(key) { return this.#keys.indexOf(key) }
 
-  /** @param {import('./types').SlideData} slide @param {number} [i] */
-  addSlide(slide, i) {
-    if (i === undefined) this.#slides.push(slide)
-    else {
-      if (!Number.isInteger(i) || i < 0 || i > this.#slides.length) {
-        throw new RangeError('SlideManager: insertion index is out of range')
-      }
-      this.#slides.splice(i, 0, slide)
+  assertIndex(index) {
+    if (!Number.isInteger(index) || index < 0 || index >= this.#slides.length) {
+      throw new RangeError('Carousel: slide index is out of range')
     }
   }
 
-  /** @param {number} i */
-  removeSlide(i) {
-    if (!Number.isInteger(i) || i < 0 || i >= this.#slides.length) {
-      throw new RangeError('SlideManager: removal index is out of range')
+  setSlides(slides) {
+    validateSlides(slides)
+    const pool = new Map()
+    for (let i = 0; i < this.#slides.length; i++) {
+      const data = this.#slides[i]
+      const identity = data.id ?? data
+      if (!pool.has(identity)) pool.set(identity, [])
+      pool.get(identity).push(this.#keys[i])
     }
-    this.#slides.splice(i, 1)
+    const keys = slides.map(data => pool.get(data.id ?? data)?.shift() ?? {})
+    this.#slides = [...slides]
+    this.#keys = keys
   }
 
-  clear() { this.#slides = [] }
+  updateSlide(index, patch) {
+    this.assertIndex(index)
+    if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+      throw new TypeError('Carousel: slide patch must be an object')
+    }
+    const previous = this.#slides[index]
+    if (Object.hasOwn(patch, 'id') && patch.id !== previous.id) {
+      throw new TypeError('Carousel: a slide id cannot be changed by updateSlide')
+    }
+    const next = { ...previous, ...patch }
+    validateSlide(next)
+    this.#slides[index] = next
+  }
+
+  moveSlide(from, to) {
+    this.assertIndex(from)
+    this.assertIndex(to)
+    if (from === to) return false
+    this.#slides.splice(to, 0, this.#slides.splice(from, 1)[0])
+    this.#keys.splice(to, 0, this.#keys.splice(from, 1)[0])
+    return true
+  }
+
+  addSlide(slide, index = this.#slides.length) {
+    if (!Number.isInteger(index) || index < 0 || index > this.#slides.length) {
+      throw new RangeError('SlideManager: insertion index is out of range')
+    }
+    const next = [...this.#slides]
+    next.splice(index, 0, slide)
+    this.setSlides(next)
+  }
+
+  removeSlide(index) {
+    this.assertIndex(index)
+    this.#slides.splice(index, 1)
+    this.#keys.splice(index, 1)
+  }
+
+  clear() { this.#slides = []; this.#keys = [] }
 }

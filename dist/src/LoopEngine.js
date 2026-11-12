@@ -94,8 +94,8 @@ export class LoopEngine {
    * @param {number} [slideWidth]
    * @param {'horizontal' | 'vertical'} [orientation]
    */
-  positionSlides(slides, position, viewportWidth = 0, slideWidth = 0, orientation = 'horizontal') {
-    if (this.#count === 0 || this.#step <= 0) return
+  getSlots(slides, position, viewportWidth = 0, slideWidth = 0) {
+    if (this.#count === 0 || this.#step <= 0) return []
     const loopLength = this.#loopLength
     const normalized = this.normalize(position)
     const hasCopies = slides.some(slide => slide.dataset?.carouselCopy !== undefined)
@@ -138,6 +138,11 @@ export class LoopEngine {
       }
     }
 
+    return slots
+  }
+
+  positionSlides(slides, position, viewportWidth = 0, slideWidth = 0, orientation = 'horizontal') {
+    const slots = this.getSlots(slides, position, viewportWidth, slideWidth)
     for (const { slide, x } of slots) {
       slide.style.transform = orientation === 'vertical'
         ? 'translate3d(0, ' + x + 'px, 0)'

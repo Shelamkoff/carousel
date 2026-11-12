@@ -15,6 +15,13 @@ function node(tag = 'div') {
     getAttribute: name => attributes.get(name) ?? null,
     removeAttribute: name => attributes.delete(name),
     appendChild(child) { child.remove?.(); this.children.push(child); child.parentNode = this; return child },
+    insertBefore(child, reference) {
+      child.remove?.()
+      const index = reference ? this.children.indexOf(reference) : this.children.length
+      this.children.splice(index, 0, child)
+      child.parentNode = this
+      return child
+    },
     remove() {
       if (!this.parentNode) return
       this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1)
@@ -251,6 +258,9 @@ for (const loop of [false, true]) {
       return slide
     })
     context.getVisualElements = () => visual
+    context.getRenderState = () => ({ orientation: context.options.orientation, reducedMotion: false,
+      slides: visual.map((element, index) => ({ element, index, isCopy: false, progress: index })),
+    })
     const parallax = createParallax({ factor: 0.2 })
     parallax.install(context)
     try {
@@ -262,7 +272,7 @@ for (const loop of [false, true]) {
       assert.equal(layers[0].style.transform, 'translateX(0%)')
       assert.ok(Math.abs(parseFloat(layers[2].style.transform.slice(11)) + 40) < 1e-10)
       context.emit('transition:start')
-      assert.equal(frames.size, 1)
+      assert.equal(frames.size, 0, 'only the core owns animation scheduling')
       context.emit('resize')
       assert.equal(frames.size, 0)
     } finally { parallax.destroy() }
@@ -321,6 +331,9 @@ test('parallax wraps its own slide and never adopts or tears down a nested carou
   innerRoot.appendChild(innerWrapper)
   outerSlide.appendChild(innerRoot)
   context.getVisualElements = () => [outerSlide]
+  context.getRenderState = () => ({ orientation: context.options.orientation, reducedMotion: false,
+    slides: [{ element: outerSlide, index: 0, isCopy: false, progress: 0 }],
+  })
   const parallax = createParallax()
   parallax.install(context)
   try {

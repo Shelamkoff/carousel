@@ -11,7 +11,10 @@ import { createAutoplay } from '../src/plugins/autoplay.js'
 class Element {
   constructor(tag = 'div') {
     this.tagName = tag.toUpperCase()
-    this.style = { touchAction: '', setProperty(name, value) { this[name] = value } }
+    this.style = { touchAction: '', setProperty(name, value) { this[name] = value },
+      getPropertyValue(name) { return this[name] ?? '' }, getPropertyPriority() { return '' },
+      removeProperty(name) { const value = this[name] ?? ''; delete this[name]; return value },
+    }
     this.dataset = {}
     this.attributes = new Map()
     this.nodes = []
@@ -425,7 +428,7 @@ test('reduced motion preferences suppress positional animations', () => {
   }
 })
 
-test('update re-invokes render functions and isolates their errors', () => {
+test('refresh re-invokes render functions and isolates their errors', () => {
   const host = new Element()
   host.width = 200
   let shouldThrow = false
@@ -444,7 +447,7 @@ test('update re-invokes render functions and isolates their errors', () => {
     if (index === 1 && error.message === 'render failure') failures++
   })
   shouldThrow = true
-  carousel.update({ gap: 1 })
+  carousel.refresh(1)
   assert.equal(renderCalls, 2)
   assert.equal(failures, 1)
   carousel.destroy()
@@ -977,7 +980,7 @@ for (const transition of ['stairs', 'pixel', 'curtain']) {
       carousel.goTo(4)
       frame(110)
       assert.equal(probe.ctx.getPosition(), 400)
-      assert.equal(incoming.style.transform, 'translateX(-80%)')
+      assert.equal(incoming.style.transform, 'translateX(0%)', 'parallax now updates in the commit frame itself')
       const overlay = viewport.querySelector('.carousel__transition')
       for (const panel of overlay.children) {
         assert.equal(panel.style.transform, 'translate3d(0%, 0%, 0)')
@@ -1127,7 +1130,7 @@ for (const scenario of [
       ...Array.from({ length: 3 }, (_, index) => ({ content: String(index + 1) })),
     ]
     carousel = new Carousel(host, slides, {
-      loop: scenario.loop, transition: scenario.transition,
+      slidesPerView: 2, gap: 10, loop: scenario.loop, transition: scenario.transition,
       transitionDuration: scenario.duration, plugins: [probe],
     })
     const events = []
@@ -1136,7 +1139,7 @@ for (const scenario of [
     carousel.on('transition:end', ({ index }) => events.push(`end:${index}`))
     carousel.on('slide:change', ({ index, prevIndex }) => events.push(`change:${prevIndex}:${index}`))
     try {
-      carousel.update({ slidesPerView: 2, gap: 10 })
+      carousel.refresh()
       const eventsAfterUpdate = [...events]
       await Promise.resolve()
       frame(200)
@@ -1163,13 +1166,13 @@ test('navigation from a render error waits for the rebuilt geometry', async () =
       return new Element('article')
     } },
     { content: 'Second' }, { content: 'Third' }, { content: 'Fourth' },
-  ], { transitionDuration: 0, plugins: [probe] })
+  ], { slidesPerView: 2, transitionDuration: 0, plugins: [probe] })
   const events = []
   carousel.on('slide:error', () => { events.push('error'); carousel.goTo(1) })
   carousel.on('resize', () => events.push('resize'))
   carousel.on('slide:change', ({ index }) => events.push(`change:${index}`))
   try {
-    carousel.update({ slidesPerView: 2 })
+    carousel.refresh()
     await Promise.resolve()
     assert.equal(carousel.getIndex(), 1)
     assert.equal(probe.ctx.getPosition(), 50)
@@ -1194,13 +1197,13 @@ test('nested rebuilds defer the last navigation request until the newest layout 
       return new Element('article')
     } },
     ...Array.from({ length: 4 }, (_, index) => ({ content: String(index + 1) })),
-  ], { transitionDuration: 0, plugins: [probe] })
+  ], { slidesPerView: 2, transitionDuration: 0, plugins: [probe] })
   const events = []
   carousel.on('resize', () => { events.push('resize'); carousel.goTo(2) })
   carousel.on('transition:start', ({ toIndex }) => events.push(`start:${toIndex}`))
   carousel.on('slide:change', ({ index }) => events.push(`change:${index}`))
   try {
-    carousel.update({ slidesPerView: 2 })
+    carousel.refresh()
     await Promise.resolve()
     assert.equal(carousel.getIndex(), 2)
     assert.equal(probe.ctx.getStep(), 102)
@@ -1226,12 +1229,12 @@ test('destroy during a render callback cancels its queued navigation', async () 
       return new Element('article')
     } },
     { content: 'Second' }, { content: 'Third' },
-  ], { transitionDuration: 0 })
+  ], { slidesPerView: 2, transitionDuration: 0 })
   const events = []
   carousel.on('transition:start', () => events.push('start'))
   carousel.on('slide:change', () => events.push('change'))
   try {
-    carousel.update({ slidesPerView: 2 })
+    carousel.refresh()
     await Promise.resolve()
     assert.equal(host.children.length, 0)
     assert.deepEqual(events, [])
@@ -1907,4 +1910,381 @@ test('expanding layout rejects incompatible options before creating DOM', () => 
     assert.throws(() => new Carousel(host, [{ content: 'one' }], options))
     assert.equal(host.children.length, 0)
   }
+})
+
+test('slide updates render only changed content and retain neighboring DOM', () => {
+  const host = new Element()
+  const calls = [0, 0, 0]
+  const slides = calls.map((_, i) => ({ id: `card-${i}`, content: () => {
+    calls[i]++
+    const content = new Element('input'); content.value = `value-${i}`; return content
+  } }))
+  const carousel = new Carousel(host, slides, { transitionDuration: 0 })
+  try {
+    const nodes = carousel.getSlideElements()
+    nodes[0].firstChild.value = 'user edit'
+    carousel.updateSlide(1, { content: '<p>replacement</p>' })
+    assert.equal(carousel.getSlideElement(0), nodes[0])
+    assert.equal(nodes[0].firstChild.value, 'user edit')
+    assert.equal(carousel.getSlideElement(1), nodes[1])
+    assert.equal(carousel.getSlideElement(1).innerHTML, '<p>replacement</p>')
+    assert.equal(carousel.getSlideElement(2), nodes[2])
+    assert.deepEqual(calls, [1, 1, 1])
+    carousel.updateSlide(0, { meta: { price: 15 } })
+    assert.equal(carousel.getSlideElement(0).firstChild.value, 'user edit')
+    assert.deepEqual(calls, [1, 1, 1])
+    assert.deepEqual(carousel.getSlide(0).meta, { price: 15 })
+  } finally { carousel.destroy() }
+})
+
+test('moveSlide keeps the selected identity and original content without ids', () => {
+  const { carousel, track } = mount(100, 4, { startIndex: 1, transitionDuration: 0 })
+  try {
+    const original = [...track.children]
+    const data = carousel.getSlide()
+    carousel.moveSlide(1, 3)
+    assert.equal(carousel.getIndex(), 3)
+    assert.equal(carousel.getSlide(), data)
+    assert.deepEqual(track.children, [original[0], original[2], original[3], original[1]])
+    carousel.moveSlide(0, 2)
+    assert.equal(carousel.getIndex(), 3)
+    carousel.moveSlide(3, 0)
+    assert.equal(carousel.getIndex(), 0)
+    assert.equal(track.children[0], original[1])
+  } finally { carousel.destroy() }
+})
+
+test('setSlides reconciles immutable keyed data and publishes one collection event', () => {
+  const host = new Element()
+  const contents = ['a', 'b', 'c'].map(() => new Element('input'))
+  const slides = contents.map((node, i) => ({ id: ['a','b','c'][i], content: () => node }))
+  const carousel = new Carousel(host, slides, { startIndex: 1, transitionDuration: 0 })
+  try {
+    const before = carousel.getSlideElements()
+    contents[1].value = 'preserved'
+    const events = []
+    carousel.on('slides:change', event => events.push(event))
+    carousel.setSlides([{ ...slides[2] }, { ...slides[0] }, { ...slides[1], meta: { title: 'updated' } }])
+    assert.equal(carousel.getIndex(), 2)
+    assert.equal(carousel.getSlide().id, 'b')
+    assert.deepEqual(carousel.getSlideElements(), [before[2], before[0], before[1]])
+    assert.equal(contents[1].value, 'preserved')
+    assert.equal(events.length, 1)
+    assert.equal(events[0].type, 'set')
+    assert.equal(events[0].count, 3)
+    assert.equal(events[0].index, 2)
+    carousel.setSlides([])
+    assert.equal(carousel.getSlideCount(), 0)
+    assert.equal(carousel.getIndex(), 0)
+    assert.equal(carousel.getSlide(), null)
+    carousel.setSlides(slides)
+    assert.equal(carousel.getSlideCount(), 3)
+    assert.equal(carousel.getIndex(), 0)
+  } finally { carousel.destroy() }
+})
+
+test('collection validation is atomic and rejects ambiguous ids or invalid indices', () => {
+  const { carousel, track } = mount(100, 3, { startIndex: 1, transitionDuration: 0 })
+  try {
+    const slides = carousel.getSlides()
+    const nodes = [...track.children]
+    for (const action of [
+      () => carousel.setSlides([{ id: 'same', content: 'a' }, { id: 'same', content: 'b' }]),
+      () => carousel.setSlides([{ content: 'ok' }, { content: null }]),
+      () => carousel.updateSlide(1, { content: null }),
+      () => carousel.updateSlide(-1, { content: 'x' }),
+      () => carousel.moveSlide(0, 3),
+      () => carousel.moveSlide(.5, 1),
+    ]) assert.throws(action)
+    assert.deepEqual(carousel.getSlides(), slides)
+    assert.deepEqual(track.children, nodes)
+    assert.equal(carousel.getIndex(), 1)
+  } finally { carousel.destroy() }
+})
+
+test('option updates preserve live content and explicit refresh re-renders only its target', () => {
+  const host = new Element()
+  const calls = [0, 0]
+  const carousel = new Carousel(host, calls.map((_, i) => ({ content: () => {
+    calls[i]++; return new Element('input')
+  } })))
+  try {
+    const content = carousel.getSlideElement(0).firstChild
+    content.value = 'kept'
+    carousel.update({ gap: 16 })
+    assert.equal(carousel.getSlideElement(0).firstChild, content)
+    assert.equal(content.value, 'kept')
+    assert.deepEqual(calls, [1, 1])
+    carousel.refresh(1)
+    assert.deepEqual(calls, [1, 2])
+    assert.equal(carousel.getSlideElement(0).firstChild, content)
+    carousel.refresh()
+    assert.deepEqual(calls, [2, 3])
+  } finally { carousel.destroy() }
+})
+
+test('render state exposes continuous geometry for drag, loop copies and expand', () => {
+  for (const layout of ['standard', 'expand']) {
+    const probe = { name: 'frame-probe', install(ctx) { this.ctx = ctx } }
+    const { carousel } = mount(400, 2, { layout, loop: true, gap: 12, plugins: [probe] })
+    try {
+      assert.equal(typeof carousel.getRenderState, 'function')
+      const frames = []
+      carousel.on('render', value => frames.push(value))
+      probe.ctx.setPositionDrag(probe.ctx.getStep() * .25)
+      assert.equal(frames.length, 1)
+      const frame = frames[0]
+      assert.equal(frame.phase, 'drag')
+      assert.equal(frame.direction, 1)
+      assert.equal(frame.viewportSize, 400)
+      const first = frame.slides.find(slide => slide.index === 0 && !slide.isCopy)
+      const next = frame.slides.find(slide => slide.index === 1 && !slide.isCopy)
+      assert.ok(Math.abs(first.progress + .25) < 1e-9)
+      assert.ok(Math.abs(first.focus - .75) < 1e-9)
+      assert.ok(Math.abs(next.focus - .25) < 1e-9)
+      assert.ok(frame.slides.every(slide => slide.visible >= 0 && slide.visible <= 1))
+      assert.ok(Object.isFrozen(frame) && Object.isFrozen(frame.slides) && Object.isFrozen(first))
+      assert.equal(carousel.getRenderState(), frame)
+    } finally { carousel.destroy() }
+  }
+})
+
+test('custom layout controls geometry while navigation and DOM ownership remain in core', () => {
+  const { carousel, track } = mount(400, 4, {
+    transitionDuration: 0,
+    layout: { name: 'application-stack', render: context => context.slides.map(slide => ({
+      offset: slide.offset / 2, size: slide.size * .75, progress: slide.progress,
+    })) },
+  })
+  try {
+    assert.equal(parseFloat(track.children[0].style.width), 300)
+    carousel.goTo(2)
+    assert.equal(carousel.getIndex(), 2)
+    const state = carousel.getRenderState().slides
+    assert.equal(state[2].offset, 0)
+    assert.equal(state[3].offset, 200)
+    assert.equal(state[2].element, track.children[2])
+    carousel.update({ layout: 'standard' })
+    assert.equal(parseFloat(track.children[0].style.width), 400)
+  } finally { carousel.destroy() }
+})
+
+test('a failing layout falls back once and never leaves half-written geometry', () => {
+  let fail = false
+  const { carousel } = mount(400, 3, { transitionDuration: 0, layout: {
+    name: 'fallible-layout', render: context => fail ? [{ offset: NaN, size: 2 }] : context.slides,
+  } })
+  try {
+    const errors = []
+    carousel.on('layout:error', error => errors.push(error))
+    fail = true
+    carousel.next()
+    carousel.next()
+    assert.equal(carousel.getIndex(), 2)
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0].name, 'fallible-layout')
+    assert.ok(carousel.getRenderState().slides.every(slide => Number.isFinite(slide.offset)))
+  } finally { carousel.destroy() }
+})
+
+test('slide effects share the core clock, restore owned styles, and can be removed', async () => {
+  const { createSlideEffect } = await import('../src/index.js')
+  assert.equal(typeof createSlideEffect, 'function')
+  const renders = []
+  let disposed = 0
+  const effect = createSlideEffect({ name: 'test-effect', create({ setStyle }) {
+    return { render(state) {
+      renders.push(state)
+      for (const slide of state.slides) setStyle(slide.element, '--test-focus', String(slide.focus))
+    }, destroy() { disposed++ } }
+  } })
+  const { carousel, track } = mount(400, 3, { transitionDuration: 100, plugins: [effect] })
+  try {
+    assert.equal(track.children[0].style['--test-focus'], '1')
+    carousel.next()
+    frame(25)
+    assert.ok(renders.some(state => state.phase === 'animation' && state.transitionProgress === .25))
+    frame(75)
+    assert.equal(carousel.getIndex(), 1)
+    assert.equal(track.children[1].style['--test-focus'], '1')
+    const count = renders.length
+    assert.equal(carousel.unuse(effect.name), true)
+    assert.equal(disposed, 1)
+    assert.equal(track.children[1].style['--test-focus'] ?? '', '')
+    carousel.next(); frame(100)
+    assert.equal(renders.length, count)
+    assert.equal(carousel.unuse(effect.name), false)
+    carousel.use(effect)
+    assert.equal(track.children[2].style['--test-focus'], '1')
+  } finally { carousel.destroy() }
+  assert.equal(disposed, 2)
+})
+
+test('parallax synchronizes programmatic position changes without a private animation loop', () => {
+  const probe = { name: 'render-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel, track } = mount(400, 3, { plugins: [createParallax({ factor: .2 }), probe] })
+  try {
+    const before = clock.frames.size
+    probe.ctx.setPositionDrag(100)
+    assert.equal(track.children[0].firstChild.firstChild.style.transform, 'translateX(5%)')
+    assert.equal(clock.frames.size, before)
+  } finally { carousel.destroy() }
+})
+
+for (const transition of ['slide', 'fade', 'pixel']) {
+  test(`${transition} publishes every core animation frame and no frames after cancellation`, () => {
+    const { carousel } = mount(300, 3, { transition, transitionDuration: 100 })
+    try {
+      const frames = []
+      carousel.on('render', state => frames.push(state))
+      carousel.next()
+      frame(25)
+      assert.ok(frames.some(state => state.transitionProgress === .25), 'effects receive the shared timeline')
+      carousel.update({ gap: 5 })
+      const count = frames.length
+      frame(200)
+      assert.equal(frames.length, count)
+      assert.equal(carousel.getRenderState().phase, 'idle')
+    } finally { carousel.destroy() }
+  })
+}
+
+test('effect style owners release out of order without resurrecting removed styles', async () => {
+  const { createSlideEffect } = await import('../src/index.js')
+  const { carousel, track } = mount(300, 2)
+  const node = track.children[0]
+  node.style.setProperty('--shared', 'application')
+  const make = (name, value) => createSlideEffect({ name, create({ setStyle }) {
+    return { render() { setStyle(node, '--shared', value) } }
+  } })
+  try {
+    const first = make('first', 'first'); const second = make('second', 'second')
+    carousel.use(first).use(second)
+    assert.equal(node.style.getPropertyValue('--shared'), 'second')
+    carousel.unuse(first.name)
+    assert.equal(node.style.getPropertyValue('--shared'), 'second')
+    carousel.unuse(second.name)
+    assert.equal(node.style.getPropertyValue('--shared'), 'application')
+    carousel.use(first)
+    node.style.setProperty('--shared', 'new application value')
+    carousel.unuse(first.name)
+    assert.equal(node.style.getPropertyValue('--shared'), 'new application value')
+  } finally { carousel.destroy() }
+})
+
+test('failed effects are isolated, restore styles and destroy resources exactly once', async () => {
+  const { createSlideEffect } = await import('../src/index.js')
+  const { carousel, track } = mount(300, 3, { transitionDuration: 0 })
+  const errors = []; let destroyed = 0
+  carousel.on('effect:error', error => errors.push(error))
+  const effect = createSlideEffect({ name: 'bad-effect', create({ setStyle }) {
+    return { render(state) {
+      setStyle(state.slides[0].element, '--managed', 'changed')
+      if (state.index > 0) throw new Error('effect failed')
+    }, destroy() { destroyed++ } }
+  } })
+  try {
+    carousel.use(effect)
+    carousel.next()
+    carousel.next()
+    assert.equal(carousel.getIndex(), 2)
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0].error.message, 'effect failed')
+    assert.equal(track.children[0].style.getPropertyValue('--managed'), '')
+    assert.equal(destroyed, 1)
+    carousel.unuse(effect.name)
+    assert.equal(destroyed, 1)
+  } finally { carousel.destroy() }
+})
+
+for (const transition of ['slide', 'fade', 'pixel']) {
+  test(`${transition} render listeners can cancel without stale completion`, () => {
+    const { carousel } = mount(300, 3, { transition, transitionDuration: 0 })
+    try {
+      const completed = []
+      carousel.on('transition:end', value => completed.push(value))
+      carousel.once('render', () => carousel.update({ gap: 14 }))
+      carousel.next()
+      assert.deepEqual(completed, [])
+      assert.equal(carousel.getRenderState().phase, 'idle')
+      assert.equal(carousel.getRenderState().transitionProgress, null)
+    } finally { carousel.destroy() }
+  })
+}
+
+test('retired plugin commands cannot mutate a live carousel after unuse', () => {
+  let retired
+  const { carousel } = mount(300, 3, { transitionDuration: 0,
+    plugins: [{ name: 'retired-commands', install(ctx) { retired = ctx } }] })
+  try {
+    carousel.unuse('retired-commands')
+    retired.next()
+    retired.setPositionDrag(300)
+    retired.setSlides([])
+    retired.emit('resize', {})
+    assert.equal(carousel.getIndex(), 0)
+    assert.equal(carousel.getSlideCount(), 3)
+    assert.equal(carousel.getRenderState().position, 0)
+  } finally { carousel.destroy() }
+})
+
+test('plugin destructors can remove peers without a duplicate disposal', () => {
+  const { carousel } = mount(300, 3)
+  const calls = []
+  carousel.use({ name: 'first-disposal', install() {}, destroy() { calls.push('first') } })
+  carousel.use({ name: 'second-disposal', install() {}, destroy() {
+    calls.push('second'); carousel.unuse('first-disposal')
+  } })
+  carousel.destroy()
+  assert.deepEqual(calls, ['second', 'first'])
+})
+
+test('custom layout reentry never writes obsolete geometry or publishes retired resize', () => {
+  const { carousel } = mount(300, 3)
+  const sizes = []
+  carousel.on('resize', () => sizes.push(carousel.getRenderState().slides[0].size))
+  try {
+    carousel.update({ layout: { name: 'reentrant-layout', render(frame) {
+      carousel.update({ layout: 'standard', gap: 9 })
+      return frame.slides.map(slide => ({ offset: slide.offset, size: 7 }))
+    } } })
+    assert.equal(carousel.getRenderState().slides[0].size, 300)
+    assert.deepEqual(sizes, [300])
+  } finally { carousel.destroy() }
+})
+
+test('releasing one effect property restores its baseline without stopping other properties', async () => {
+  const { createSlideEffect } = await import('../src/index.js')
+  const { carousel, track } = mount(300, 2)
+  const node = track.children[0]
+  node.style.setProperty('--one', 'original')
+  let release
+  const effect = createSlideEffect({ name: 'release', create({ setStyle }) {
+    release = () => setStyle(node, '--one', null)
+    return { render() { setStyle(node, '--one', 'changed'); setStyle(node, '--two', 'retained') } }
+  } })
+  try {
+    carousel.use(effect)
+    release()
+    assert.equal(node.style.getPropertyValue('--one'), 'original')
+    assert.equal(node.style.getPropertyValue('--two'), 'retained')
+  } finally { carousel.destroy() }
+})
+
+test('settlement and stopAnimation expose idle snapshots rather than stale animated state', () => {
+  const probe = { name: 'stop-state', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(300, 3, { transitionDuration: 100, plugins: [probe] })
+  try {
+    let ended
+    carousel.on('transition:end', () => { ended = carousel.getRenderState() })
+    carousel.next(); frame(100)
+    assert.equal(ended.phase, 'idle')
+    assert.equal(ended.transitionProgress, null)
+    carousel.next(); frame(25)
+    const before = carousel.getRenderState().position
+    probe.ctx.stopAnimation()
+    assert.equal(carousel.getRenderState().phase, 'idle')
+    assert.equal(carousel.getRenderState().transitionProgress, null)
+    assert.equal(carousel.getRenderState().position, before)
+  } finally { carousel.destroy() }
 })

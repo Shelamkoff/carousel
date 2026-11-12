@@ -5,6 +5,6 @@ import { createParallax } from '@shelamkoff/carousel'
 const plugin = createParallax({ factor: 0.2 })
 ```
 
-Wraps slide content in parallax layers and follows transitions and pointer dragging with `requestAnimationFrame`. The finite `factor` defaults to `0.2` and is clamped to `0..1`. Wrappers, listeners, and animation frames are removed during plugin cleanup.
+Wraps slide content in parallax layers and consumes numeric core `render` frames for transitions and dragging. It does not run a private animation loop or parse CSS transforms. The finite `factor` defaults to `0.2` and is clamped to `0..1`. Native atomic moves preserve content state where supported; removal restores the original structure. Reduced motion disables displacement.
 
-Lazy rendering shares the active animation clock. A layout rebuild that cancels a transition also stops the effect's frame loop, so the plugin does not keep scheduling frames while idle.
+Lazy content synchronizes through the same core render notification. Rebuilds retire and recreate wrappers without a private timer or idle polling.

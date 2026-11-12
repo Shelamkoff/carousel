@@ -1,5 +1,6 @@
-import { isHTMLElement } from './dom.js'
-import { getExpandGeometry, getExpandSlot, getExpandVirtualIndex } from './expand.js'
+import { isHTMLElement, moveElement } from './dom.js'
+import { resolveLayoutSlots } from './layouts.js'
+import { writeSlideProgress } from './renderState.js'
 
 /**
  * DOM construction and positioning.
@@ -19,6 +20,7 @@ export class TrackRenderer {
   #sourceSlides = []
   /** @type {Array<import('./types').SlideData['content']>} */
   #sourceContent = []
+  #sourceKeys = []
   /** @type {HTMLElement | null} */
   #root = null
   /** @type {ResizeObserver | null} */
@@ -39,6 +41,10 @@ export class TrackRenderer {
   #isLoop = false
   #vertical = false
   #expanding = false
+  #layoutOptions = { layout: 'standard' }
+  #lastSlots = null
+  #failedLayout = false
+  #onLayoutError = null
   /** @type {((index: number, error: Error) => void) | null} */
   #onRenderError = null
   #document = null
@@ -69,6 +75,7 @@ export class TrackRenderer {
     track.className = 'carousel__track'
 
     this.#slideElements = slides.map((slide, i) => this.#createSlide(slide, i, slides.length))
+    this.#sourceKeys = layout.keys ?? [...slides]
     this.#sourceSlides = [...slides]
     this.#sourceContent = slides.map(slide => slide.content)
     for (const el of this.#slideElements) track.appendChild(el)
@@ -196,7 +203,7 @@ export class TrackRenderer {
   #setupSlideResizeObserver() {
     this.#slideResizeObserver?.disconnect()
     this.#slideResizeObserver = null
-    if (!this.#isLoop) return
+    if (!this.#isLoop && !this.#expanding) return
     const Observer = this.#view?.ResizeObserver ?? ResizeObserver
     this.#slideResizeObserver = new Observer(() => this.#scheduleObservedLayout())
     for (const slide of this.#slideElements) this.#slideResizeObserver.observe(slide)
@@ -237,6 +244,8 @@ export class TrackRenderer {
 
   /** @param {(index: number, error: Error) => void} cb */
   onRenderError(cb) { this.#onRenderError = cb }
+  onLayoutError(cb) { this.#onLayoutError = cb }
+  get revision() { return this.#revision }
 
   /** @param {HTMLElement} el @param {import('./types').SlideData} slide @param {number} index */
   #renderContent(el, slide, index) {
@@ -284,9 +293,13 @@ export class TrackRenderer {
   /** Keep orientation and viewport sizing together during atomic rebuilds. */
   #configureOrientation(layout) {
     this.#vertical = layout.orientation === 'vertical'
-    this.#expanding = layout.layout === 'expand'
+    this.#expanding = (layout.layout ?? 'standard') !== 'standard'
+    this.#layoutOptions = { ...layout, layout: layout.layout ?? 'standard' }
+    this.#failedLayout = false
+    this.#lastSlots = null
     this.#root?.classList.toggle('carousel--vertical', this.#vertical)
-    this.#root?.classList.toggle('carousel--expand', this.#expanding)
+    this.#root?.classList.toggle('carousel--expand', layout.layout === 'expand')
+    this.#root?.classList.toggle('carousel--custom-layout', typeof layout.layout === 'object')
     if (this.#viewport) {
       this.#viewport.style.height = this.#vertical && layout.viewportHeight !== undefined
         ? layout.viewportHeight + 'px' : ''
@@ -338,7 +351,9 @@ export class TrackRenderer {
         el.style.top = ''
         el.style.left = ''
         el.style.transform = ''
-        el.style.removeProperty?.('--carousel-expand-focus')
+        for (const name of ['--carousel-expand-focus', '--carousel-slide-focus', '--carousel-slide-progress']) {
+          el.style.removeProperty?.(name)
+        }
       }
     }
 
@@ -388,40 +403,67 @@ export class TrackRenderer {
       ? `translate3d(0, ${offset}px, 0)` : `translate3d(${offset}px, 0, 0)`
   }
 
-  /**
-   * Expanding cards use the same logical position/clock as ordinary navigation.
-   * Only adjacent cards grow; other cards retain a stable, smaller width.
-   * The track stays stationary and the originals retain their DOM identity.
-   *
-   * @param {number} position Logical fractional slide index.
-   * @param {number} ratio Expanded width relative to a compact card.
-   * @param {number} peek Free space at the leading edge in CSS pixels.
-   */
-  renderExpand(position, ratio, peek) {
-    if (!this.#viewport || !this.#track) return
-    const count = this.#slideElements.length
-    const geometry = getExpandGeometry(
-      position, this.#lastViewportSize, this.#slidesPerView, ratio, peek, this.#gap, count, this.#isLoop,
-    )
-    if (this.#track.style.transform !== 'none') this.#track.style.transform = 'none'
-    for (const el of this.getPositionElements()) {
-      const logical = Number(el.dataset.index)
-      const copy = Number(el.dataset.carouselCopy ?? 0)
-      const virtual = this.#isLoop ? getExpandVirtualIndex(logical, position, count, copy) : logical
-      const { offset, size, focus } = getExpandSlot(geometry, virtual)
-      if (this.#vertical) {
-        el.style.height = size + 'px'
-        el.style.minHeight = size + 'px'
-      } else {
-        el.style.width = size + 'px'
-        el.style.minWidth = size + 'px'
-      }
-      el.style.flexBasis = size + 'px'
-      el.style.transform = this.#vertical
-        ? `translate3d(0, ${offset}px, 0)`
-        : `translate3d(${offset}px, 0, 0)`
-      el.style.setProperty('--carousel-expand-focus', String(focus))
+  /** Numeric geometry is calculated once and shared with effects, never read back from CSS. */
+  #baseSlots(position, engine) {
+    const step = this.#slideSize + this.#gap
+    const slots = engine
+      ? engine.getSlots(this.getPositionElements(), position, this.#lastViewportSize, this.#slideSize)
+      : this.#slideElements.map((slide, logical) => ({ slide, logical, copy: 0, x: logical * step - position }))
+    return slots.map(({ slide, logical, copy, x }) => ({
+      element: slide, index: logical, copy, isCopy: copy !== 0,
+      offset: x, size: this.#slideSize, progress: step > 0 ? x / step : 0,
+    }))
+  }
+
+  getRenderSlots(position, engine) { return this.#lastSlots ?? this.#baseSlots(position, engine) }
+
+  renderPosition(position, engine) {
+    if (!this.#viewport || !this.#track) return false
+    const revision = this.#revision
+    const options = this.#layoutOptions
+    const layout = options.layout
+    // Preserve the O(1) track-transform path for an ordinary finite carousel.
+    // Its per-slide snapshot is allocated only when a render consumer asks for it.
+    if (!engine && layout === 'standard') {
+      this.#lastSlots = null
+      this.setPosition(-position)
+      return true
     }
+    const base = this.#baseSlots(position, engine)
+    let slots = base
+    if (layout !== 'standard' && !this.#failedLayout) {
+      try {
+        const geometry = resolveLayoutSlots(layout, {
+          position, step: this.#slideSize + this.#gap, viewportSize: this.#lastViewportSize,
+          gap: this.#gap, count: this.#slideElements.length, loop: !!engine,
+          orientation: this.#vertical ? 'vertical' : 'horizontal',
+          slides: base.map(({ element, ...slot }) => slot),
+        }, options)
+        slots = base.map((slot, index) => ({ ...slot, ...geometry[index] }))
+      } catch (error) {
+        if (this.#revision !== revision) return false
+        this.#failedLayout = true
+        const name = typeof layout === 'string' ? layout : layout.name
+        const normalized = error instanceof Error ? error : new Error(String(error))
+        if (this.#onLayoutError) this.#onLayoutError(name, normalized)
+        else console.error(`Carousel: layout "${name}" failed`, normalized)
+      }
+    }
+    if (this.#revision !== revision) return false
+    this.#track.style.transform = 'none'
+    for (const slot of slots) {
+      const el = slot.element
+      if (layout !== 'standard') {
+        el.style[this.#vertical ? 'height' : 'width'] = slot.size + 'px'
+        el.style[this.#vertical ? 'minHeight' : 'minWidth'] = slot.size + 'px'
+        el.style.flexBasis = slot.size + 'px'
+        writeSlideProgress(el, slot.progress)
+      }
+      el.style.transform = this.#vertical
+        ? `translate3d(0, ${slot.offset}px, 0)` : `translate3d(${slot.offset}px, 0, 0)`
+    }
+    this.#lastSlots = slots
+    return true
   }
 
   // Track animations are owned by Carousel's position controller.
@@ -447,18 +489,20 @@ export class TrackRenderer {
     // A breakpoint change must not wipe focus, input state or listeners.
     const pool = new Map()
     for (let i = 0; i < this.#sourceSlides.length; i++) {
-      const data = this.#sourceSlides[i]
-      if (!pool.has(data)) pool.set(data, [])
-      pool.get(data).push({ element: this.#slideElements[i], content: this.#sourceContent[i] })
+      const key = this.#sourceKeys[i]
+      if (!pool.has(key)) pool.set(key, [])
+      pool.get(key).push({ element: this.#slideElements[i], content: this.#sourceContent[i] })
     }
 
     const next = []
     for (let index = 0; index < slides.length; index++) {
       const slide = slides[index]
-      const previous = pool.get(slide)?.shift()
+      const key = layout.keys?.[index] ?? slide
+      const previous = pool.get(key)?.shift()
       const el = previous ? previous.element : this.#createSlide(slide, index, slides.length)
       if (this.#revision !== revision) return
-      if (previous && (refreshContent || previous.content !== slide.content)) {
+      if (previous && (refreshContent === true || refreshContent instanceof Set && refreshContent.has(key)
+        || previous.content !== slide.content || !slide.lazy && el.dataset.rendered !== 'true')) {
         el.replaceChildren()
         if (this.#revision !== revision) return
         delete el.dataset.rendered
@@ -476,7 +520,7 @@ export class TrackRenderer {
     const kept = new Set(next)
     for (let i = 0; i < next.length; i++) {
       if (this.#track.children[i] !== next[i]) {
-        this.#track.insertBefore(next[i], this.#track.children[i] ?? null)
+        moveElement(this.#track, next[i], this.#track.children[i] ?? null)
         if (this.#revision !== revision) return
       }
     }
@@ -488,6 +532,7 @@ export class TrackRenderer {
     }
 
     this.#slideElements = next
+    this.#sourceKeys = layout.keys ?? [...slides]
     this.#sourceSlides = [...slides]
     this.#sourceContent = slides.map(slide => slide.content)
     this.#configureCopies(layout.slidesPerView)
@@ -520,6 +565,8 @@ export class TrackRenderer {
     this.#slideResizeObserver = null
     this.#onResize = null
     this.#onRenderError = null
+    this.#onLayoutError = null
+    this.#lastSlots = null
     for (const copy of this.#copies) copy.remove()
     this.#copies = []
     this.#root?.remove()
@@ -529,6 +576,7 @@ export class TrackRenderer {
     this.#slideElements = []
     this.#sourceSlides = []
     this.#sourceContent = []
+    this.#sourceKeys = []
     this.#document = null
     this.#view = null
   }

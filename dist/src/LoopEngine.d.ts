@@ -8,5 +8,8 @@ export class LoopEngine {
   toIndex(pos: number): number
   shortestDelta(currentPos: number, targetIndex: number): number
   directedDelta(currentPos: number, targetIndex: number, direction: 1 | -1): number
+  getSlots(slides: HTMLElement[], position: number, viewportWidth?: number, slideWidth?: number): Array<{
+    slide: HTMLElement; logical: number; copy: number; x: number
+  }>
   positionSlides(slides: HTMLElement[], position: number, viewportWidth?: number, slideWidth?: number, orientation?: 'horizontal' | 'vertical'): void
 }

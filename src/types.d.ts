@@ -1,11 +1,17 @@
+import type { CarouselLayout, CarouselRenderState } from './renderTypes.js'
+
 /* ── Slide ── */
 
 export interface SlideData {
+  /** Stable, unique collection identity for immutable reconciliation. */
+  id?: string | number
   content: string | HTMLElement | (() => HTMLElement)
   thumb?: string
   lazy?: boolean
   meta?: Record<string, unknown>
 }
+
+export type SlidePatch = Partial<Omit<SlideData, 'id'>>
 
 /* ── Transition ── */
 
@@ -51,7 +57,16 @@ export interface PluginContext {
   goToAfterDrag(index: number, fromIndex: number, direction?: 1 | -1, startPosition?: number): void
   snapBack(index?: number): void
 
+  // Collection commands, revoked when this plugin is removed.
+  addSlide(slide: SlideData, index?: number): void
+  removeSlide(index: number): void
+  updateSlide(index: number, patch: SlidePatch): void
+  moveSlide(from: number, to: number): void
+  setSlides(slides: readonly SlideData[]): void
+  refresh(index?: number): void
+
   // Read-only state
+  getRenderState(): CarouselRenderState | null
   getIndex(): number
   getRealIndex(): number
   getSlide(index?: number): SlideData | null
@@ -99,7 +114,7 @@ export interface CarouselOptions {
   slidesPerScroll?: number | 'auto'
   orientation?: 'horizontal' | 'vertical'
   /** 'expand' grows the active card and animates neighboring previews. */
-  layout?: 'standard' | 'expand'
+  layout?: CarouselLayout
   /** Number of compact-card equivalents visible in expand mode. Default 2.5. */
   expandVisible?: number
   /** Active card size / compact card size. Default 2.5. */
@@ -139,6 +154,16 @@ export interface AutoplayState {
 }
 
 export interface CarouselEventMap {
+  'render': [state: CarouselRenderState]
+  'render:reset': []
+  'layout:error': [payload: { name: string; error: Error }]
+  'effect:error': [payload: { name: string; error: Error }]
+  'slides:change': [payload: {
+    type: 'add' | 'remove' | 'update' | 'move' | 'set' | 'refresh'
+    previousCount: number
+    count: number
+    index: number
+  }]
   'slide:beforeChange': [payload: { fromIndex: number; toIndex: number }]
   'slide:change': [payload: { index: number; prevIndex: number; slide: SlideData }]
   'transition:start': [payload: { fromIndex: number; toIndex: number }]

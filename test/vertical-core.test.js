@@ -286,11 +286,12 @@ test('vertical focus uses vertical bounds and clears both native scroll axes', a
 
 test('vertical fade restores finite sizing after completion and orientation update', async t => {
   const { carousel, context, track, viewport } = mount(t, { orientation: 'vertical', viewportHeight: 420, transition: 'fade', transitionDuration: 10 })
+  const completed = new Promise(resolve => carousel.once('transition:end', resolve))
   carousel.next()
   assert.equal(track.style.height, '420px')
   assert.equal(context.getSlideElement(1).style.width, '100%')
   assert.equal(context.getSlideElement(1).style.height, '420px')
-  await new Promise(resolve => setTimeout(resolve, 40))
+  await completed
   assert.equal(carousel.getIndex(), 1)
   assert.equal(context.getSlideElement(1).style.position, '')
   assert.equal(track.style.height, '420px')

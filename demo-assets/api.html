@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Carousel — Slide API playground</title>
+  <link rel="stylesheet" href="../styles/carousel.css">
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; padding: 32px 20px; background: #f5f5f5; color: #263246; font: 15px/1.5 system-ui, sans-serif; }
+    main { max-width: 960px; margin: auto; }
+    h1 { margin: 12px 0; font-size: 28px; font-weight: 600; }
+    p { max-width: 72ch; }
+    a { color: #354791; text-underline-offset: 3px; }
+    .settings, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin: 20px 0; }
+    label { display: inline-flex; align-items: center; gap: 8px; }
+    button, select, input { font: inherit; }
+    button, select { padding: 8px 12px; border: 1px solid #b9c3d3; border-radius: 4px; background: white; color: inherit; }
+    button { cursor: pointer; }
+    button:hover { background: #e8edf4; }
+    :focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
+    #gallery { --carousel-radius: 8px; --carousel-expand-height: 340px; padding: 16px; background: #e1e8f1; border-radius: 8px; }
+    .api-card { position: relative; height: 340px; overflow: hidden; border-radius: 8px; background: #1c3454; color: white; }
+    .api-card img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .api-card::after { content: ''; position: absolute; inset: 0; background: linear-gradient(transparent 30%, #102039ee); pointer-events: none; }
+    .api-body { position: absolute; z-index: 1; left: 20px; right: 20px; bottom: 22px; }
+    .api-card h2 { margin: 0 0 12px; font-size: 26px; line-height: 1.15; }
+    .api-card label { display: block; font-size: 12px; }
+    .api-card input { display: block; width: 100%; margin-top: 6px; padding: 9px; border: 1px solid #adbdd4; border-radius: 3px; background: white; color: #263246; }
+    #status { display: block; margin: 12px 0; font-variant-numeric: tabular-nums; }
+    #events { white-space: pre-wrap; padding: 12px 0; color: #526078; min-height: 72px; }
+    code { font-size: 13px; }
+    .note { color: #526078; }
+    @media (max-width: 520px) { body { padding: 20px 12px; } #gallery { padding: 10px; } h1 { font-size: 24px; } }
+  </style>
+</head>
+<body data-status="running">
+<main>
+  <a href="../">All carousel examples</a>
+  <h1>Slide API playground</h1>
+  <p>Type into a card, reorder the collection, or change its layout. Unchanged content keeps its DOM and input values. Content replacement and explicit refresh affect only the selected card.</p>
+  <div class="settings" aria-label="Layout and effects">
+    <label><span id="layout-label">Layout</span> <select id="layout" aria-labelledby="layout-label"><option value="standard">Standard</option><option value="expand" selected>Expand</option><option value="custom">Custom compact stack</option></select></label>
+    <label><span id="orientation-label">Orientation</span> <select id="orientation" aria-labelledby="orientation-label"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label>
+    <label><input id="focus-effect" type="checkbox"> Focus effect</label>
+    <label><input id="caption-effect" type="checkbox" checked> Caption effect</label>
+    <label><input id="parallax" type="checkbox"> Parallax</label>
+  </div>
+  <div id="gallery"></div>
+  <output id="status" aria-live="polite"></output>
+  <div class="actions" aria-label="Collection actions">
+    <button id="move" type="button">Move selected to end</button>
+    <button id="reverse" type="button">Reverse immutable list</button>
+    <button id="metadata" type="button">Update metadata</button>
+    <button id="replace" type="button">Replace selected content</button>
+    <button id="refresh" type="button">Refresh selected</button>
+    <button id="append" type="button">Add card</button>
+    <button id="remove" type="button">Remove selected</button>
+  </div>
+  <p class="note"><code>updateSlide()</code>, <code>moveSlide()</code>, <code>setSlides()</code> and <code>refresh()</code> share reconciliation. Effects use the core frame, including drag and resize. Custom geometry does not replace logical navigation.</p>
+  <pre id="events" aria-label="Recent API events"></pre>
+</main>
+<script type="importmap">{"imports":{"@shelamkoff/event-bus":"./event-bus/index.js"}}</script>
+<script type="module">
+  import { Carousel, createArrows, createKeyboard, createSwipe, createControls,
+    createSlideEffect, createFocusEffect, createParallax } from '../src/index.js'
+
+  const host = document.getElementById('gallery')
+  const renderCard = (id, title) => () => {
+    const card = document.createElement('article')
+    card.className = 'api-card'
+    const image = document.createElement('img')
+    image.src = `./panel-${id % 6 + 1}.svg`; image.alt = ''; image.width = 800; image.height = 400
+    const body = document.createElement('div'); body.className = 'api-body'
+    const heading = document.createElement('h2'); heading.textContent = title
+    const label = document.createElement('label'); label.textContent = `Note for card ${id + 1}`
+    const input = document.createElement('input'); input.placeholder = 'Type here to test state preservation'
+    input.value = `Draft ${id + 1}`; label.append(input); body.append(heading, label); card.append(image, body)
+    return card
+  }
+  let nextId = 4
+  let revision = 0
+  const initial = Array.from({ length: nextId }, (_, id) => ({ id, content: renderCard(id, `Story ${id + 1}`) }))
+  const caption = createSlideEffect({ name: 'caption-demo', create({ setStyle }) {
+    return { render(frame) {
+      for (const slide of frame.slides) {
+        const title = slide.element.querySelector('h2')
+        const shift = frame.reducedMotion ? 0 : (1 - slide.focus) * 16
+        setStyle(title, 'translate', `0 ${shift}px`)
+        setStyle(title, 'opacity', String(.65 + slide.focus * .35))
+      }
+    } }
+  } })
+  const focus = createFocusEffect({ scale: .92, opacity: .7, selector: '.api-card' })
+  const parallax = createParallax({ factor: .12 })
+  const carousel = new Carousel(host, initial, {
+    layout: 'expand', expandVisible: 2.4, expandRatio: 2.5, expandPeek: 24,
+    gap: 16, loop: true, transitionDuration: 600, ariaLabel: 'Slide API playground',
+    plugins: [createArrows(), createKeyboard(), createSwipe({ mouse: true }),
+      createControls({ playPause: false, progress: false }), caption],
+  })
+  const log = []
+  function show(message) {
+    const slide = carousel.getSlide()
+    document.getElementById('status').textContent = `${carousel.getSlideCount()} cards · selected id ${slide?.id ?? 'none'} · index ${carousel.getIndex()}`
+    if (message) { log.unshift(message); log.length = Math.min(log.length, 4) }
+    document.getElementById('events').textContent = log.join('\n')
+  }
+  carousel.on('slides:change', event => show(`${event.type}: ${event.previousCount} → ${event.count} cards`))
+  carousel.on('slide:change', () => show('Navigation settled'))
+  carousel.on('effect:error', ({ name, error }) => show(`${name}: ${error.message}`))
+  carousel.on('layout:error', ({ name, error }) => show(`${name}: ${error.message}`))
+  const compact = { name: 'compact-stack', render({ slides }) {
+    return slides.map(slide => ({ offset: slide.offset * .75, size: slide.size * .7, progress: slide.progress }))
+  } }
+  function configure() {
+    const layout = document.getElementById('layout').value
+    carousel.update({
+      layout: layout === 'custom' ? compact : layout,
+      slidesPerView: layout === 'expand' ? 1 : 1.6,
+      orientation: document.getElementById('orientation').value,
+      viewportHeight: 460,
+    })
+    show('Configuration updated; content retained')
+  }
+  document.getElementById('layout').addEventListener('change', configure)
+  document.getElementById('orientation').addEventListener('change', configure)
+  for (const [id, effect] of [['focus-effect', focus], ['caption-effect', caption], ['parallax', parallax]]) {
+    document.getElementById(id).addEventListener('change', event => {
+      if (event.target.checked) carousel.use(effect)
+      else carousel.unuse(effect.name)
+      show(`${effect.name}: ${event.target.checked ? 'installed' : 'removed'}`)
+    })
+  }
+  document.getElementById('move').onclick = () => { if (carousel.getSlideCount()) carousel.moveSlide(carousel.getIndex(), carousel.getSlideCount() - 1) }
+  document.getElementById('reverse').onclick = () => carousel.setSlides(carousel.getSlides().reverse().map(slide => ({ ...slide })))
+  document.getElementById('metadata').onclick = () => { if (carousel.getSlide()) carousel.updateSlide(carousel.getIndex(), { meta: { revision: ++revision } }) }
+  document.getElementById('replace').onclick = () => {
+    const slide = carousel.getSlide()
+    if (slide) carousel.updateSlide(carousel.getIndex(), { content: renderCard(Number(slide.id), `Revised story ${++revision}`) })
+  }
+  document.getElementById('refresh').onclick = () => { if (carousel.getSlide()) carousel.refresh(carousel.getIndex()) }
+  document.getElementById('append').onclick = () => {
+    const id = nextId++; carousel.addSlide({ id, content: renderCard(id, `Story ${id + 1}`) })
+  }
+  document.getElementById('remove').onclick = () => carousel.removeSlide(carousel.getIndex())
+  show('Ready: edit a note, then try a collection action')
+  document.body.dataset.status = 'pass'
+</script>
+</body>
+</html>

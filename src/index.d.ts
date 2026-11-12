@@ -32,3 +32,13 @@ export type {
   CarouselEventName,
   AutoplayState,
 } from './types.js'
+
+export { createSlideEffect } from './effects/createSlideEffect.js'
+export { createFocusEffect } from './effects/focus.js'
+export type { FocusEffectOptions } from './effects/focus.js'
+export type { SlidePatch } from './types.js'
+export type {
+  CarouselLayout, CarouselLayoutDefinition, CarouselLayoutContext, CarouselLayoutSlot,
+  CarouselSlideGeometry, CarouselRenderState, CarouselRenderSlide,
+  SlideEffectDefinition, SlideEffectContext, SlideEffectInstance,
+} from './renderTypes.js'

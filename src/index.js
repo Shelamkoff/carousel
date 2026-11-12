@@ -12,3 +12,7 @@ export { createAutoplay } from './plugins/autoplay.js'
 export { createControls } from './plugins/controls.js'
 export { createLazyLoad } from './plugins/lazyload.js'
 export { createParallax } from './plugins/parallax.js'
+
+// Slide effects share the carousel's render clock.
+export { createSlideEffect } from './effects/createSlideEffect.js'
+export { createFocusEffect } from './effects/focus.js'

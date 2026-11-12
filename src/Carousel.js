@@ -1,5 +1,10 @@
 import { EventBus } from '@shelamkoff/event-bus'
 import { SlideManager } from './SlideManager.js'
+import { validateSlide, validateSlides } from './slideData.js'
+import { DEFAULTS, validateResolvedOptions, validateOptionsTree } from './options.js'
+import { createPluginScope } from './PluginScope.js'
+import { createRenderState } from './renderState.js'
+import { FadeTransition } from './transitions/FadeTransition.js'
 import { TrackRenderer } from './TrackRenderer.js'
 import { LoopEngine } from './LoopEngine.js'
 import { BreakpointManager } from './BreakpointManager.js'
@@ -8,123 +13,6 @@ import { getLastSlideIndex } from './navigation.js'
 import { ViewportTransition, isViewportTransition } from './transitions/ViewportTransition.js'
 
 const ownedPluginInstances = new WeakSet()
-
-/** @type {import('./types').CarouselOptions} */
-const DEFAULTS = {
-  slidesPerView: 1,
-  orientation: 'horizontal',
-  layout: 'standard',
-  expandVisible: 2.5,
-  expandRatio: 2.5,
-  expandPeek: 32,
-  slidesPerScroll: 1,
-  gap: 0,
-  transition: 'slide',
-  transitionDuration: 400,
-  loop: false,
-  startIndex: 0,
-  ariaLabel: 'Carousel',
-}
-
-function validateResolvedOptions(options) {
-  if (options.layout !== 'standard' && options.layout !== 'expand') {
-    throw new TypeError('Carousel: layout must be "standard" or "expand"')
-  }
-  if (!Number.isFinite(options.expandVisible) || options.expandVisible < 1) {
-    throw new RangeError('Carousel: expandVisible must be a finite number >= 1')
-  }
-  if (!Number.isFinite(options.expandRatio) || options.expandRatio < 1) {
-    throw new RangeError('Carousel: expandRatio must be a finite number >= 1')
-  }
-  if (!Number.isFinite(options.expandPeek) || options.expandPeek < 0) {
-    throw new RangeError('Carousel: expandPeek must be a non-negative finite number')
-  }
-  if (options.layout === 'expand' && options.slidesPerView !== 1) {
-    throw new RangeError('Carousel: expand layout has one active slide; use expandVisible for neighboring previews')
-  }
-  if (options.layout === 'expand' && options.transition === 'fade') {
-    throw new TypeError('Carousel: fade is incompatible with expanding layout')
-  }
-  if (options.orientation !== 'horizontal' && options.orientation !== 'vertical') {
-    throw new TypeError('Carousel: orientation must be "horizontal" or "vertical"')
-  }
-  if (options.viewportHeight !== undefined
-    && (!Number.isFinite(options.viewportHeight) || options.viewportHeight <= 0)) {
-    throw new RangeError('Carousel: viewportHeight must be a positive finite number')
-  }
-  if (!Number.isFinite(options.slidesPerView) || options.slidesPerView <= 0) {
-    throw new RangeError('Carousel: slidesPerView must be a positive number')
-  }
-  if (options.slidesPerScroll !== 'auto'
-    && (!Number.isInteger(options.slidesPerScroll) || options.slidesPerScroll <= 0)) {
-    throw new RangeError('Carousel: slidesPerScroll must be a positive integer or "auto"')
-  }
-  if (!Number.isFinite(options.gap) || options.gap < 0) {
-    throw new RangeError('Carousel: gap must be a non-negative number')
-  }
-  if (!Number.isFinite(options.transitionDuration) || options.transitionDuration < 0) {
-    throw new RangeError('Carousel: transitionDuration must be a non-negative number')
-  }
-  if (options.transition !== 'slide' && options.transition !== 'fade' && !isViewportTransition(options.transition)) {
-    throw new TypeError('Carousel: transition must be a built-in name or a definition with name and create(context)')
-  }
-  if (!Number.isInteger(options.startIndex) || options.startIndex < 0) {
-    throw new RangeError('Carousel: startIndex must be a non-negative integer')
-  }
-  if (typeof options.loop !== 'boolean') {
-    throw new TypeError('Carousel: loop must be a boolean')
-  }
-  if (typeof options.ariaLabel !== 'string' || !options.ariaLabel.trim()) {
-    throw new TypeError('Carousel: ariaLabel must be a non-empty string')
-  }
-  return options
-}
-
-function validateOptionsTree(options) {
-  const resolved = { ...options }
-  const breakpoints = resolved.breakpoints
-  delete resolved.breakpoints
-  validateResolvedOptions(resolved)
-  if (!breakpoints) return
-  if (typeof breakpoints !== 'object' || Array.isArray(breakpoints)) {
-    throw new TypeError('Carousel: breakpoints must be an object')
-  }
-  const entries = Object.entries(breakpoints)
-    .map(([width, override]) => [Number(width), override])
-    .sort((a, b) => a[0] - b[0])
-  for (const [width, override] of entries) {
-    if (!Number.isFinite(width) || width < 0) throw new RangeError('Carousel: breakpoint widths must be non-negative numbers')
-    if (!override || typeof override !== 'object' || Array.isArray(override)) {
-      throw new TypeError('Carousel: breakpoint overrides must be objects')
-    }
-    if (Object.prototype.hasOwnProperty.call(override, 'plugins')
-      || Object.prototype.hasOwnProperty.call(override, 'startIndex')
-      || Object.prototype.hasOwnProperty.call(override, 'breakpoints')) {
-      throw new TypeError('Carousel: nested breakpoints, plugins, and startIndex overrides are not supported')
-    }
-    Object.assign(resolved, override)
-    delete resolved.breakpoints
-    validateResolvedOptions(resolved)
-  }
-}
-
-function validateSlide(slide) {
-  if (!slide || typeof slide !== 'object') throw new TypeError('Carousel: each slide must be an object')
-  const content = slide.content
-  if (typeof content !== 'string' && typeof content !== 'function' && !isHTMLElement(content)) {
-    throw new TypeError('Carousel: slide content must be a string, HTMLElement, or render function')
-  }
-  if (slide.thumb !== undefined && typeof slide.thumb !== 'string') {
-    throw new TypeError('Carousel: slide thumb must be a string')
-  }
-  if (slide.lazy !== undefined && typeof slide.lazy !== 'boolean') {
-    throw new TypeError('Carousel: slide lazy must be a boolean')
-  }
-  if (slide.meta !== undefined
-    && (!slide.meta || typeof slide.meta !== 'object' || Array.isArray(slide.meta))) {
-    throw new TypeError('Carousel: slide meta must be an object')
-  }
-}
 
 /**
  * Position-first carousel.
@@ -150,10 +38,7 @@ export class Carousel {
   #rafId = 0
   /** @type {number} */
   #animationTimer = 0
-  /** @type {number} */
-  #fadeTimer = 0
-  /** @type {boolean} */
-  #fadeCancelled = false
+  #fadeTransition = null
   /** @type {ViewportTransition | null} */
   #viewportTransition = null
   #container = null
@@ -170,6 +55,13 @@ export class Carousel {
   #queuedNavigation = null
   #focusHandler = null
   #focusRequest = null
+  #renderState = null
+  #renderSerial = 0
+  #renderPhase = 'idle'
+  #lastRenderPosition = 0
+  #renderDirection = 0
+  #transitionProgress = null
+  #transitionDirection = 0
 
   constructor(container, slides, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options)) {
@@ -183,8 +75,7 @@ export class Carousel {
       ? document.querySelector(container) : container
     if (!this.#container) throw new Error('Carousel: container not found')
     if (!isHTMLElement(this.#container)) throw new TypeError('Carousel: container must be an HTMLElement')
-    if (!Array.isArray(slides)) throw new TypeError('Carousel: slides must be an array')
-    slides.forEach(validateSlide)
+    validateSlides(slides)
     if (options.plugins !== undefined && !Array.isArray(options.plugins)) {
       throw new TypeError('Carousel: plugins must be an array')
     }
@@ -211,6 +102,9 @@ export class Carousel {
       this.#trackRenderer.onRenderError((index, error) => {
         this.#events.emit('slide:error', { index, error })
       })
+      this.#trackRenderer.onLayoutError((name, error) => {
+        this.#dispatchEvents(() => this.#events.emit('layout:error', { name, error }))
+      })
 
       if (options.plugins) {
         for (const plugin of options.plugins) this.use(plugin)
@@ -232,6 +126,7 @@ export class Carousel {
       ariaLabel: opts.ariaLabel,
       orientation: opts.orientation,
       viewportHeight: opts.viewportHeight,
+      keys: this.#slideManager.getKeys(),
       layout: opts.layout,
       expandRatio: opts.expandRatio,
       expandPeek: opts.expandPeek,
@@ -354,7 +249,7 @@ export class Carousel {
     this.#pendingResizeStep = null
     this.#initLoop()
     this.#position = idx * this.#step()
-    this.#render()
+    if (!this.#render()) return
     this.#selectedIndex = this.getIndex()
     this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
   }
@@ -390,37 +285,51 @@ export class Carousel {
    * Loop: each slide positioned individually. Track stays at 0.
    * Non-loop: track moves, slides stay in flex flow.
    */
-  #render(clamp = true) {
-    if (this.#resolvedOptions.layout === 'expand') {
-      const step = this.#step()
-      if (!this.#loop && clamp) {
-        const lastPosition = Math.max(0, this.#slideManager.getSlideCount() - 1) * step
-        this.#position = Math.max(0, Math.min(this.#position, lastPosition))
-      }
-      this.#trackRenderer.renderExpand(
-        step > 0 ? this.#position / step : this.#selectedIndex,
-        this.#resolvedOptions.expandRatio, this.#resolvedOptions.expandPeek,
-      )
-      return
-    }
-    if (this.#loop) {
-      this.#loop.positionSlides(
-        this.#trackRenderer.getPositionElements(),
-        this.#position,
-        this.#trackRenderer.viewportSize,
-        this.#trackRenderer.slideSize,
-        this.#resolvedOptions.orientation,
-      )
-      return
-    }
-    if (clamp) {
-      const step = this.#step()
-      const count = this.#slideManager.getSlideCount()
-      const perView = this.#resolvedOptions.slidesPerView ?? 1
-      const maxPos = Math.max(0, count - perView) * step
+  #render(clamp = true, phase = this.#animating ? 'animation' : 'idle') {
+    if (this.#destroyed) return false
+    if (!this.#loop && clamp) {
+      const maxPos = Math.max(0, this.#slideManager.getSlideCount()
+        - (this.#resolvedOptions.slidesPerView ?? 1)) * this.#step()
       this.#position = Math.max(0, Math.min(this.#position, maxPos))
     }
-    this.#trackRenderer.setPosition(-this.#position)
+    const epoch = this.#navigationEpoch
+    let rendered = false
+    this.#dispatchEvents(() => { rendered = this.#trackRenderer.renderPosition(this.#position, this.#loop) })
+    if (rendered && !this.#destroyed && this.#navigationEpoch === epoch) this.#publishRenderState(phase)
+    return rendered && !this.#destroyed && this.#navigationEpoch === epoch
+  }
+
+  #publishRenderState(phase = this.#animating ? 'animation' : 'idle') {
+    if (this.#destroyed) return
+    const delta = this.#position - this.#lastRenderPosition
+    this.#renderDirection = Math.abs(delta) > 1e-9 ? Math.sign(delta)
+      : phase === 'animation' ? this.#transitionDirection : 0
+    this.#lastRenderPosition = this.#position
+    this.#renderPhase = phase
+    this.#renderState = null
+    this.#renderSerial++
+    if (this.#events.has('render')) {
+      const state = this.getRenderState()
+      this.#dispatchEvents(() => this.#events.emit('render', state))
+    }
+  }
+
+  /** Lazy, immutable snapshots keep the unobserved finite path constant-time. */
+  getRenderState() {
+    if (this.#destroyed) return null
+    if (!this.#renderState) {
+      const view = this.#container?.ownerDocument?.defaultView ?? window
+      this.#renderState = createRenderState(this.#fadeTransition?.getSlots()
+        ?? this.#trackRenderer.getRenderSlots(this.#position, this.#loop), {
+        position: this.#position, step: this.#step(), viewportSize: this.#trackRenderer.viewportSize,
+        orientation: this.#resolvedOptions.orientation, index: this.getIndex(),
+        selectedIndex: this.#selectedIndex, fromIndex: this.#prevIndex,
+        direction: this.#renderDirection, phase: this.#renderPhase,
+        transitionProgress: this.#transitionProgress, revision: this.#trackRenderer.revision,
+        reducedMotion: !!view.matchMedia?.('(prefers-reduced-motion: reduce)').matches,
+      })
+    }
+    return this.#renderState
   }
 
   #handleBreakpointChange() {
@@ -432,12 +341,14 @@ export class Carousel {
     this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
     const opts = this.#resolvedOptions
     this.#dispatchEvents(() => {
+      this.#events.emit('render:reset')
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout())
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()
       this.#position = oldIdx * this.#step()
       this.#selectedIndex = oldIdx
-      this.#render()
+      if (!this.#render()) return
       this.#selectedIndex = this.getIndex()
       this.#rebuilding = false
       this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
@@ -451,9 +362,15 @@ export class Carousel {
     const epoch = ++this.#navigationEpoch
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
     if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
-    this.#cancelFade()
-    this.#trackRenderer.stopAnimation()
     this.#animating = false
+    this.#transitionProgress = null
+    this.#transitionDirection = 0
+    this.#renderState = null
+    this.#renderPhase = 'idle'
+    this.#renderDirection = 0
+    this.#cancelFade()
+    if (this.#navigationEpoch !== epoch) return epoch
+    this.#trackRenderer.stopAnimation()
     if (this.#viewportTransition) this.#destroyViewportTransition(this.#viewportTransition)
     return epoch
   }
@@ -494,6 +411,10 @@ export class Carousel {
 
     const idx = this.getIndex()
     this.#selectedIndex = idx
+    this.#renderState = null
+    this.#renderPhase = 'idle'
+    this.#renderDirection = 0
+    this.#transitionProgress = null
     const previous = this.#prevIndex
     const slide = this.#slideManager.getSlide(idx)
     this.#dispatchEvents(() => {
@@ -568,54 +489,30 @@ export class Carousel {
 
   getPlugin(name) { return this.#plugins.get(name)?.plugin }
 
-  #createPluginContext() {
-    const subscriptions = new Set()
-    const onSubscriptions = new Map()
-    let closed = false
-
-    // EventBus may already have snapshotted a callback when it is removed.
-    // Owned callbacks stay inert after unsubscribe or context cleanup, and
-    // a retired context cannot register new work after its owner is gone.
-    const subscribe = (ev, fn, once = false) => {
-      if (typeof fn !== 'function') throw new TypeError('Carousel: event handler must be a function')
-      if (closed) return () => {}
-      const existing = !once && onSubscriptions.get(ev)?.get(fn)
-      if (existing) return existing
-
-      let active = true
-      const unsubscribe = () => {
-        if (!active) return
-        active = false
-        subscriptions.delete(unsubscribe)
-        if (!once) {
-          const handlers = onSubscriptions.get(ev)
-          handlers?.delete(fn)
-          if (!handlers?.size) onSubscriptions.delete(ev)
-        }
-        remove()
-      }
-      const remove = this.#events.on(ev, (...args) => {
-        if (!active || closed) return
-        // Remove before dispatch so nested emissions cannot repeat a once
-        // callback or retain its subscription in a long-lived plugin.
-        if (once) unsubscribe()
-        return fn(...args)
-      })
-      subscriptions.add(unsubscribe)
-      if (!once) {
-        if (!onSubscriptions.has(ev)) onSubscriptions.set(ev, new Map())
-        onSubscriptions.get(ev).set(fn, unsubscribe)
-      }
-      return unsubscribe
+  unuse(name) {
+    const entry = this.#plugins.get(name)
+    if (!entry) return false
+    this.#plugins.delete(name)
+    try { entry.plugin.destroy?.() }
+    finally {
+      entry.cleanupContext()
+      ownedPluginInstances.delete(entry.plugin)
     }
-    const context = Object.freeze({
-      on: (ev, fn) => subscribe(ev, fn),
-      once: (ev, fn) => subscribe(ev, fn, true),
-      emit: (ev, ...args) => this.#events.emit(ev, ...args),
+    return true
+  }
 
+  #createPluginContext() {
+    return createPluginScope(this.#events, {
       next: () => this.next(),
       prev: () => this.prev(),
       goTo: (i) => this.goTo(i),
+      addSlide: (slide, i) => this.addSlide(slide, i),
+      removeSlide: i => this.removeSlide(i),
+      updateSlide: (i, patch) => this.updateSlide(i, patch),
+      moveSlide: (from, to) => this.moveSlide(from, to),
+      setSlides: slides => this.setSlides(slides),
+      refresh: i => this.refresh(i),
+      getRenderState: () => this.getRenderState(),
       goToAfterDrag: (i, startIndex, direction, startPosition) => {
         this.#navigate(i, direction, startIndex, startPosition)
       },
@@ -654,7 +551,7 @@ export class Carousel {
       setPositionDrag: (pos) => {
         if (!Number.isFinite(pos)) throw new TypeError('Carousel drag position must be finite')
         this.#position = pos
-        this.#render(false)
+        this.#render(false, 'drag')
       },
       getStep: () => this.#step(),
       getLoopEngine: () => this.#loop,
@@ -688,17 +585,20 @@ export class Carousel {
       getSlideElement: (i) => this.#trackRenderer.getSlideElement(i),
       renderSlide: (i) => {
         const slide = this.#slideManager.getSlide(i)
-        return !!slide && this.#trackRenderer.renderSlide(i, slide)
+        if (!slide || this.#destroyed) return false
+        if (this.#trackRenderer.getSlideElement(i)?.dataset.rendered === 'true') return true
+        const epoch = this.#navigationEpoch
+        let rendered = false
+        this.#dispatchEvents(() => {
+          this.#events.emit('render:reset')
+          if (this.#destroyed || this.#navigationEpoch !== epoch) return
+          rendered = this.#trackRenderer.renderSlide(i, slide)
+          if (!this.#destroyed && this.#navigationEpoch === epoch) this.#render()
+        }, true)
+        return rendered
       },
       refreshLayout: () => this.#trackRenderer.refreshLayout(),
     })
-    return {
-      context,
-      cleanup: () => {
-        closed = true
-        for (const unsubscribe of [...subscriptions]) unsubscribe()
-      },
-    }
   }
 
   /* ═══════════════ Navigation ═══════════════ */
@@ -814,6 +714,7 @@ export class Carousel {
 
     const duration = durationOverride ?? this.#duration()
     this.#selectedIndex = index
+    this.#transitionDirection = Math.sign(targetPos - this.#position)
     if (isViewportTransition(this.#resolvedOptions.transition)) {
       this.#performViewportTransition(targetPos, duration)
     } else if (this.#resolvedOptions.transition === 'fade' && (this.#resolvedOptions.slidesPerView ?? 1) <= 1) {
@@ -829,8 +730,7 @@ export class Carousel {
     const viewport = this.#trackRenderer.getViewport()
     if (duration <= 0 || !viewport) {
       this.#position = targetPos
-      this.#render()
-      this.#onAnimationComplete()
+      if (this.#render()) this.#onAnimationComplete()
       return
     }
     const transition = new ViewportTransition(
@@ -851,8 +751,7 @@ export class Carousel {
       this.#reportTransitionError(transition.name, error)
       if (this.#destroyed || this.#navigationEpoch !== stoppedEpoch) return
       this.#position = targetPos
-      this.#render()
-      this.#onAnimationComplete()
+      if (this.#render()) this.#onAnimationComplete()
     }
     try {
       this.#dispatchEvents(() => transition.initialize())
@@ -869,7 +768,7 @@ export class Carousel {
           this.#dispatchEvents(() => transition.render(0.5))
           if (!active()) return
           this.#position = targetPos
-          this.#render()
+          if (!this.#render() || !active()) return
           committed = true
           // Let position-sensitive plugins sample the committed destination
           // before revealing it, unless this is the final fallback frame.
@@ -893,104 +792,34 @@ export class Carousel {
    * @param {number} duration
    */
   #performFade(fromIdx, toIdx, targetPos, duration) {
-    this.#animating = true
     if (duration <= 0) {
-      this.#render()
-      this.#onAnimationComplete()
+      if (this.#render()) this.#onAnimationComplete()
       return
     }
-
-    // Fade is not compatible with multi-slide view
-    if ((this.#resolvedOptions.slidesPerView ?? 1) > 1) {
-      this.#animateToPosition(targetPos, duration)
-      return
-    }
-
     const slides = this.#trackRenderer.getSlideElements()
-    const fromEl = slides[fromIdx]
-    const toEl = slides[toIdx]
-    if (!fromEl || !toEl) { this.#animating = false; return }
-
-    const slideSize = this.#trackRenderer.slideSize
-    const vertical = this.#resolvedOptions.orientation === 'vertical'
-    const track = this.#trackRenderer.getTrack()
-
-    // Lock track height before absolute positioning
-    if (track) {
-      track.style.height = (vertical ? this.#trackRenderer.viewportSize : track.offsetHeight) + 'px'
-      track.style.transform = 'none'
-    }
-
-    // Stack all slides, show only from and to
-    for (const el of slides) {
-      el.style.position = 'absolute'
-      el.style.top = '0'
-      el.style.left = '0'
-      el.style.width = vertical ? '100%' : slideSize + 'px'
-      el.style.height = vertical ? slideSize + 'px' : ''
-      el.style.opacity = el === fromEl ? '1' : '0'
-      el.style.visibility = el === fromEl || el === toEl ? 'visible' : 'hidden'
-      el.style.transform = ''
-    }
-
-    void toEl.offsetWidth
-
-    fromEl.style.transition = `opacity ${duration}ms ease`
-    toEl.style.transition = `opacity ${duration}ms ease`
-    fromEl.style.opacity = '0'
-    toEl.style.opacity = '1'
-
-    this.#fadeCancelled = false
-
-    const finish = () => {
-      if (this.#fadeCancelled) return
-      this.#fadeTimer = 0
-      this.#restoreSlidesAfterFade(slides, track)
-      this.#render()
-      this.#onAnimationComplete()
-    }
-
-    this.#fadeTimer = setTimeout(finish, duration + 20)
+    if (!slides[fromIdx] || !slides[toIdx]) { this.#animating = false; return }
+    const transition = new FadeTransition(slides, this.#trackRenderer.getTrack(),
+      this.#trackRenderer.slideSize, this.#trackRenderer.viewportSize,
+      this.#resolvedOptions.orientation, fromIdx, toIdx, this.#transitionDirection)
+    this.#fadeTransition = transition
+    this.#runAnimation(duration, progress => {
+      transition.render(progress)
+    }, () => {
+      if (this.#fadeTransition !== transition) return
+      this.#fadeTransition = null
+      transition.destroy()
+      this.#trackRenderer.refreshLayout()
+      if (this.#render()) this.#onAnimationComplete()
+    })
   }
 
-  /** Cancel fade transition and restore slide styles immediately. */
   #cancelFade() {
-    if (!this.#fadeTimer) return
-    this.#fadeCancelled = true
-    clearTimeout(this.#fadeTimer)
-    this.#fadeTimer = 0
-    const slides = this.#trackRenderer.getSlideElements()
-    const track = this.#trackRenderer.getTrack()
-    this.#restoreSlidesAfterFade(slides, track)
-    this.#render()
-  }
-
-  /**
-   * @param {HTMLElement[]} slides
-   * @param {HTMLElement | null} track
-   */
-  #restoreSlidesAfterFade(slides, track) {
-    const sw = this.#trackRenderer.slideSize
-    const vertical = this.#resolvedOptions.orientation === 'vertical'
-    const loop = this.#loop !== null
-    for (const el of slides) {
-      el.style.position = loop ? 'absolute' : ''
-      el.style.top = loop ? '0' : ''
-      el.style.left = loop ? '0' : ''
-      el.style.opacity = ''
-      el.style.visibility = ''
-      el.style.transition = ''
-      el.style.width = vertical ? '100%' : sw + 'px'
-      el.style.minWidth = vertical ? '0' : sw + 'px'
-      el.style.height = vertical ? sw + 'px' : ''
-      el.style.minHeight = vertical ? sw + 'px' : ''
-      el.style.flexBasis = sw + 'px'
-    }
-    if (track) {
-      track.style.height = ''
-      track.style.transform = ''
-    }
+    const transition = this.#fadeTransition
+    if (!transition) return
+    this.#fadeTransition = null
+    transition.destroy()
     this.#trackRenderer.refreshLayout()
+    this.#render()
   }
 
   /**
@@ -1029,6 +858,7 @@ export class Carousel {
    */
   #runPositionAnimation(targetPos, duration, done) {
     const startPos = this.#position
+    this.#transitionDirection = Math.sign(targetPos - startPos)
     const time = Math.abs(targetPos - startPos) < 0.001 ? 0 : duration
     this.#runAnimation(time, progress => {
       const eased = 1 - Math.pow(1 - progress, 3)
@@ -1042,11 +872,25 @@ export class Carousel {
     this.#animating = true
     const epoch = this.#navigationEpoch
     const current = () => !this.#destroyed && this.#navigationEpoch === epoch
+    this.#transitionProgress = 0
+    const draw = progress => {
+      this.#transitionProgress = progress
+      const serial = this.#renderSerial
+      render(progress)
+      if (current() && this.#renderSerial === serial) this.#publishRenderState('animation')
+    }
+    const complete = () => {
+      this.#transitionProgress = null
+      done()
+      if (current()) this.#publishRenderState('idle')
+    }
     if (duration <= 0) {
-      render(1)
-      if (current()) done()
+      draw(1)
+      if (current()) complete()
       return
     }
+    this.#publishRenderState('animation')
+    if (!current()) return
     const startTime = performance.now()
     let settled = false
     const finish = () => {
@@ -1054,15 +898,15 @@ export class Carousel {
       settled = true
       if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
       if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
-      render(1)
-      if (current()) done()
+      draw(1)
+      if (current()) complete()
     }
     const frame = now => {
       if (settled || !current()) return
       this.#rafId = 0
       const progress = Math.max(0, Math.min((now - startTime) / duration, 1))
       if (progress >= 1) { finish(); return }
-      render(progress)
+      draw(progress)
       if (current()) this.#rafId = requestAnimationFrame(frame)
     }
     this.#animationTimer = setTimeout(finish, duration + 60)
@@ -1096,6 +940,48 @@ export class Carousel {
   getRealIndex() { return this.getIndex() }
   getSlide(index) { return this.#slideManager.getSlide(index ?? this.getIndex()) }
   getSlides() { return this.#slideManager.getSlides() }
+  getSlideCount() { return this.#slideManager.getSlideCount() }
+  getSlideElement(index = this.getIndex()) { return this.#trackRenderer.getSlideElement(index) }
+  getSlideElements() { return [...this.#trackRenderer.getSlideElements()] }
+
+  /** Replace only the supplied fields; ids remain stable for the life of a slide. */
+  updateSlide(index, patch) {
+    if (this.#destroyed) return
+    const selected = this.getIndex()
+    this.#slideManager.updateSlide(index, patch)
+    const refresh = Object.hasOwn(patch, 'content')
+      ? new Set([this.#slideManager.getKey(index)]) : false
+    this.#rebuildTrack(selected, refresh, { type: 'update', previousCount: this.getSlideCount() })
+  }
+
+  /** Move an existing slide to a final array index without recreating its content. */
+  moveSlide(from, to) {
+    if (this.#destroyed) return
+    const selected = this.#slideManager.getKey(this.getIndex())
+    if (!this.#slideManager.moveSlide(from, to)) return
+    this.#rebuildTrack(this.#slideManager.indexOfKey(selected), false, {
+      type: 'move', previousCount: this.getSlideCount(),
+    })
+  }
+
+  /** Reconcile by explicit id, or by object identity when no id was supplied. */
+  setSlides(slides) {
+    if (this.#destroyed) return
+    const previousIndex = this.getIndex()
+    const selected = this.#slideManager.getKey(previousIndex)
+    const previousCount = this.getSlideCount()
+    this.#slideManager.setSlides(slides)
+    const retained = this.#slideManager.indexOfKey(selected)
+    this.#rebuildTrack(retained < 0 ? previousIndex : retained, false, { type: 'set', previousCount })
+  }
+
+  /** Explicitly re-run content renderers for one slide or the whole collection. */
+  refresh(index) {
+    if (this.#destroyed) return
+    if (index !== undefined) this.#slideManager.assertIndex(index)
+    this.#rebuildTrack(this.getIndex(), index === undefined ? true
+      : new Set([this.#slideManager.getKey(index)]), { type: 'refresh', previousCount: this.getSlideCount() })
+  }
 
   addSlide(slide, index) {
     if (this.#destroyed) return
@@ -1108,7 +994,9 @@ export class Carousel {
       ? this.#slideManager.getSlideCount()
       : Math.max(0, Math.min(index, this.#slideManager.getSlideCount()))
     this.#slideManager.addSlide(slide, insertionIndex)
-    this.#rebuildTrack(insertionIndex <= currentIndex ? currentIndex + 1 : currentIndex)
+    this.#rebuildTrack(insertionIndex <= currentIndex ? currentIndex + 1 : currentIndex, false, {
+      type: 'add', previousCount: this.getSlideCount() - 1,
+    })
   }
 
   removeSlide(index) {
@@ -1117,26 +1005,33 @@ export class Carousel {
     if (!Number.isInteger(index) || index < 0 || index >= count) return
     const currentIndex = this.getIndex()
     this.#slideManager.removeSlide(index)
-    this.#rebuildTrack(index < currentIndex ? currentIndex - 1 : currentIndex)
+    this.#rebuildTrack(index < currentIndex ? currentIndex - 1 : currentIndex, false, {
+      type: 'remove', previousCount: count,
+    })
   }
 
-  #rebuildTrack(index = this.getIndex(), refreshContent = false) {
+  #rebuildTrack(index = this.getIndex(), refreshContent = false, change) {
     const epoch = this.#stopAllAnimations()
     if (this.#destroyed || this.#navigationEpoch !== epoch) return
     this.#pendingResize = false
     this.#pendingResizeStep = null
     const opts = this.#resolvedOptions
     this.#dispatchEvents(() => {
+      this.#events.emit('render:reset')
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout(), refreshContent)
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()
       const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
       this.#position = Math.max(0, idx) * this.#step()
       this.#selectedIndex = Math.max(0, idx)
-      this.#render()
+      if (!this.#render()) return
       this.#selectedIndex = this.getIndex()
       this.#rebuilding = false
       this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
+      if (change && !this.#destroyed && this.#navigationEpoch === epoch) {
+        this.#events.emit('slides:change', { ...change, count: this.getSlideCount(), index: this.getIndex() })
+      }
     }, true)
   }
 
@@ -1173,7 +1068,7 @@ export class Carousel {
       this.#breakpointManager.updateBase(previousOptions)
       throw error
     }
-    this.#rebuildTrack(currentIndex, true)
+    this.#rebuildTrack(currentIndex)
   }
 
   /* ═══════════════ Events ═══════════════ */
@@ -1211,24 +1106,17 @@ export class Carousel {
     this.#stopAllAnimations()
 
     this.#events.emit('destroy')
-    const entries = [...this.#plugins.values()]
-    for (let i = entries.length - 1; i >= 0; i--) {
-      try {
-        entries[i].plugin.destroy?.()
-      } catch (error) {
-        console.error(`Carousel: plugin "${entries[i].plugin.name}" failed to destroy`, error)
-      } finally {
-        entries[i].cleanupContext()
-        ownedPluginInstances.delete(entries[i].plugin)
-      }
+    for (const name of [...this.#plugins.keys()].reverse()) {
+      try { this.unuse(name) }
+      catch (error) { console.error(`Carousel: plugin "${name}" failed to destroy`, error) }
     }
-    this.#plugins.clear()
     this.#installingPluginNames.clear()
     this.#queuedNavigation = null
 
     this.#breakpointManager.destroy()
     this.#trackRenderer.destroy()
     this.#slideManager.clear()
+    this.#renderState = null
     this.#container = null
     this.#options = {}
     this.#resolvedOptions = {}

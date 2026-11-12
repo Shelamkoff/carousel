@@ -56,6 +56,7 @@ function eventContext(overrides = {}) {
     getStep: () => 100,
     getPosition: () => 0,
     getLoopEngine: () => null,
+    getRenderState: () => ({ orientation: 'horizontal', reducedMotion: false, slides: [] }),
     on(event, handler) {
       if (!listeners.has(event)) listeners.set(event, new Set())
       listeners.get(event).add(handler)
@@ -68,7 +69,7 @@ function eventContext(overrides = {}) {
   }
 }
 
-test('parallax stops scheduling frames when a rebuild cancels a transition', () => {
+test('parallax never forks the core clock through transition, lazy loading or rebuild', () => {
   const originalRequest = globalThis.requestAnimationFrame
   const originalCancel = globalThis.cancelAnimationFrame
   const frames = new Map()
@@ -84,10 +85,10 @@ test('parallax stops scheduling frames when a rebuild cancels a transition', () 
   try {
     plugin.install(context)
     context.emit('transition:start')
-    assert.equal(frames.size, 1)
+    assert.equal(frames.size, 0)
     context.emit('slide:lazyload')
     context.emit('slide:lazyload')
-    assert.equal(frames.size, 1, 'rendering lazy content must not fork the animation clock')
+    assert.equal(frames.size, 0, 'rendering lazy content must not fork the animation clock')
     context.emit('resize')
     for (let i = 0; i < 4; i++) {
       const callbacks = [...frames.values()]
