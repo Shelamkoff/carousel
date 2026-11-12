@@ -439,7 +439,7 @@ test('autoplay cannot be restarted from its stop event during teardown', t => {
   }
 })
 
-test('autoplay waits for every held pointer and ignores unrelated pointer releases', t => {
+test('autoplay waits for every held pointer and ignores unrelated pointer releases', async t => {
   const timers = new Set()
   t.mock.method(globalThis, 'setTimeout', callback => { timers.add(callback); return callback })
   t.mock.method(globalThis, 'clearTimeout', callback => timers.delete(callback))
@@ -455,8 +455,10 @@ test('autoplay waits for every held pointer and ignores unrelated pointer releas
     assert.equal(timers.size, 0)
     viewport.dispatch({ type: 'pointerdown', pointerId: 2 })
     eventWindow.dispatch({ type: 'pointerup', pointerId: 2 })
+    await Promise.resolve()
     assert.equal(timers.size, 0, 'the first pointer is still held')
     eventWindow.dispatch({ type: 'pointercancel', pointerId: 1 })
+    await Promise.resolve()
     assert.equal(timers.size, 1)
     assert.equal(plugin.isActive(), true)
   } finally {

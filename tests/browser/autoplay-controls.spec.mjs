@@ -30,6 +30,8 @@ async function mount(page, model = {}) {
     const autoplay = model.autoplay === false ? null : createAutoplay({ interval: 1000, ...model.autoplay })
     const controls = createControls(model.controls)
     const presentation = model.autoplayFirst ? [autoplay, controls] : [controls, autoplay]
+    const swipe = model.swipe === false ? [] : [createSwipe({ mouse: true })]
+    const plugins = model.swipeFirst ? [...swipe, ...presentation.filter(Boolean)] : [...presentation.filter(Boolean), ...swipe]
     const host = document.querySelector('#controls-host')
     const carousel = new Carousel(host, Array.from({ length: model.count ?? 7 }, (_, index) => ({
       content: `<article><strong>Slide ${index + 1}</strong><label> Caption <input aria-label="Caption ${index + 1}" value="Read this slide"></label></article>`,
@@ -37,7 +39,7 @@ async function mount(page, model = {}) {
       loop: true,
       transitionDuration: 0,
       ...model.options,
-      plugins: [...presentation.filter(Boolean), createSwipe({ mouse: true }), createKeyboard()],
+      plugins: [...plugins, createKeyboard()],
     })
     window.controlsFixture = { carousel, autoplay, controls, host }
   }, model)
@@ -47,6 +49,53 @@ const readState = page => page.evaluate(() => ({
   ...window.controlsFixture.autoplay.getState(),
   index: window.controlsFixture.carousel.getIndex(),
 }))
+
+for (const order of ['no-swipe', 'autoplay-first', 'swipe-first']) {
+  test(`pointer release does not count transition or snapback time with ${order}`, async ({ page }) => {
+    await mount(page, {
+      swipe: order !== 'no-swipe', swipeFirst: order === 'swipe-first',
+      autoplay: { pauseOnHover: false, pauseOnFocus: false, pauseOnInteraction: false },
+      options: { transitionDuration: 600 },
+    })
+    await page.clock.runFor(1050)
+    expect(await readState(page)).toMatchObject({ paused: true, running: false, remaining: 1000 })
+    const phase = await page.evaluate(() => {
+      const viewport = document.querySelector('#controls-host .carousel__viewport')
+      const pointer = { pointerId: 51, button: 0, pointerType: 'mouse', isPrimary: true, bubbles: true, clientX: 300, clientY: 100 }
+      viewport.dispatchEvent(new PointerEvent('pointerdown', pointer))
+      window.dispatchEvent(new PointerEvent('pointerup', pointer))
+      return window.controlsFixture.carousel.getRenderState().phase
+    })
+    expect(phase).toBe('animation')
+    expect(await readState(page)).toMatchObject({ paused: true, running: false, remaining: 1000 })
+    await page.clock.runFor(610)
+    expect(await page.evaluate(() => window.controlsFixture.carousel.getRenderState().phase)).toBe('idle')
+    const settled = await readState(page)
+    expect(settled.running).toBe(true)
+    expect(settled.remaining).toBeGreaterThan(900)
+    expect(settled.remaining).toBeLessThanOrEqual(1000)
+  })
+}
+
+test('installing autoplay during navigation starts a full interval after settlement', async ({ page }) => {
+  await mount(page, { autoplay: false, swipe: false, options: { transitionDuration: 600 } })
+  await page.evaluate(() => window.controlsFixture.carousel.next())
+  await page.clock.runFor(100)
+  await page.evaluate(async () => {
+    const { createAutoplay } = await import('/src/index.js')
+    const fixture = window.controlsFixture
+    fixture.autoplay = createAutoplay({ interval: 1000, pauseOnHover: false, pauseOnFocus: false })
+    fixture.carousel.use(fixture.autoplay)
+  })
+  expect(await page.evaluate(() => window.controlsFixture.carousel.getRenderState().phase)).toBe('animation')
+  expect(await readState(page)).toMatchObject({ active: true, paused: true, running: false, remaining: 1000 })
+  await page.clock.runFor(520)
+  expect(await page.evaluate(() => window.controlsFixture.carousel.getRenderState().phase)).toBe('idle')
+  const settled = await readState(page)
+  expect(settled.running).toBe(true)
+  expect(settled.remaining).toBeGreaterThan(950)
+  expect(settled.remaining).toBeLessThanOrEqual(1000)
+})
 
 test('autoplay circle freezes on hover and resumes the same remaining display time', async ({ page }) => {
   await mount(page)

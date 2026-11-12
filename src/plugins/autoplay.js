@@ -44,6 +44,8 @@ export function createAutoplay(options = {}) {
   let autoNavigationStarted = false
   let lastIndex = 0
   let lastCount = 0
+  let transitionUnsub = null
+  let pointerReleaseVersion = 0
   const heldPointers = new Set()
 
   const now = () => eventWindow?.performance?.now?.() ?? globalThis.performance.now()
@@ -127,6 +129,27 @@ export function createAutoplay(options = {}) {
     publish()
   }
 
+  function stopWatchingTransition() {
+    const unsubscribe = transitionUnsub
+    transitionUnsub = null
+    unsubscribe?.()
+  }
+
+  function syncTransition(owner) {
+    stopWatchingTransition()
+    transitioning = owner.getRenderState()?.phase === 'animation'
+    if (transitioning) {
+      // A snapback has no transition:end. Watch the shared frame only until
+      // this motion settles; ordinary idle playback keeps its O(1) deadline.
+      transitionUnsub = owner.on('render', frame => {
+        if (!installed || ctx !== owner || frame.phase === 'animation') return
+        stopWatchingTransition()
+        transitioning = false
+        suspendOrResume()
+      })
+    }
+  }
+
   function stop() {
     if (!active) return
     cancelTimer()
@@ -176,6 +199,7 @@ export function createAutoplay(options = {}) {
       remaining = interval
       deadline = null
       ignoreHover = ignoreFocus = false
+      ++pointerReleaseVersion
       heldPointers.clear()
       const root = context.getRoot()
       const viewport = context.getViewport?.()
@@ -221,7 +245,8 @@ export function createAutoplay(options = {}) {
         const path = event.composedPath?.() ?? [event.target]
         if (path.some(node => node?.classList?.contains?.('carousel__controls'))
           || event.target?.closest?.('.carousel__controls')) return
-        // Dragging may cancel a transition without its completion event.
+        // The held pointer suspends playback while swipe may cancel motion.
+        // Its actual outcome is reconciled after every release handler runs.
         transitioning = false
         if (pauseOnInteraction) stop()
         else {
@@ -231,13 +256,24 @@ export function createAutoplay(options = {}) {
       })
       const releasePointer = event => {
         if (!heldPointers.delete(event.pointerId)) return
-        suspendOrResume()
+        if (typeof context.getRenderState !== 'function') {
+          suspendOrResume()
+          return
+        }
+        const owner = ctx
+        const version = ++pointerReleaseVersion
+        queueMicrotask(() => {
+          if (!installed || ctx !== owner || version !== pointerReleaseVersion) return
+          syncTransition(owner)
+          suspendOrResume()
+        })
       }
       listen(eventWindow, 'pointerup', releasePointer)
       listen(eventWindow, 'pointercancel', releasePointer)
 
       unsubs.push(
         context.on('slide:beforeChange', () => {
+          stopWatchingTransition()
           cancelTimer(false)
           remaining = interval
           transitioning = true
@@ -246,6 +282,7 @@ export function createAutoplay(options = {}) {
           publish()
         }),
         context.on('transition:end', () => {
+          stopWatchingTransition()
           cancelTimer(false)
           remaining = interval
           transitioning = false
@@ -255,6 +292,7 @@ export function createAutoplay(options = {}) {
           publish()
         }),
         context.on('resize', () => {
+          stopWatchingTransition()
           // Resizing/rebuilding may cancel the transition. A pure size change
           // preserves the countdown; changed content/index gets a new period.
           const reset = transitioning || context.getIndex() !== lastIndex
@@ -268,6 +306,7 @@ export function createAutoplay(options = {}) {
           publish()
         }),
       )
+      if (typeof context.getRenderState === 'function') syncTransition(context)
       start(false)
     },
 
@@ -277,6 +316,8 @@ export function createAutoplay(options = {}) {
       const wasActive = active
       installed = false
       active = false
+      ++pointerReleaseVersion
+      stopWatchingTransition()
       cancelTimer()
       const retiredUnsubs = unsubs
       const retiredRemovers = removers

@@ -186,6 +186,90 @@ test('countdown waits for transition completion and ignores pure geometry resize
   assert.equal(env.nextCalls, 2)
 })
 
+test('pointer release preserves the suspension of a navigation that was not cancelled', async t => {
+  const env = environment(t, { manualTransition: true })
+  let phase = 'idle'
+  env.context.getRenderState = () => ({ phase })
+  const autoplay = env.install(createAutoplay({ interval: 1000, pauseOnInteraction: false }))
+  env.advance(1000)
+  phase = 'animation'
+  env.viewport.dispatch('pointerdown', { pointerId: 1 })
+  env.view.dispatch('pointerup', { pointerId: 1 })
+  await Promise.resolve()
+
+  assert.equal(autoplay.getState().running, false)
+  env.advance(500)
+  assert.equal(autoplay.getState().remaining, 1000)
+  assert.equal(env.nextCalls, 1)
+  phase = 'idle'
+  env.finish()
+  assert.equal(autoplay.getState().running, true)
+  assert.equal(autoplay.getState().remaining, 1000)
+})
+
+for (const swipeFirst of [false, true]) {
+  test(`pointer release waits for snapback after ${swipeFirst ? 'earlier' : 'later'} swipe handlers`, async t => {
+    const env = environment(t, { manualTransition: true })
+    let phase = 'idle'
+    env.context.getRenderState = () => ({ phase })
+    const installSwipe = () => {
+      env.viewport.addEventListener('pointerdown', () => { phase = 'idle' })
+      env.view.addEventListener('pointerup', () => { phase = 'animation' })
+    }
+    if (swipeFirst) installSwipe()
+    const autoplay = env.install(createAutoplay({ interval: 1000, pauseOnInteraction: false }))
+    if (!swipeFirst) installSwipe()
+    env.advance(1000)
+    phase = 'animation'
+    env.viewport.dispatch('pointerdown', { pointerId: 1 })
+    env.view.dispatch('pointerup', { pointerId: 1 })
+    await Promise.resolve()
+
+    assert.equal(autoplay.getState().running, false)
+    env.advance(500)
+    assert.equal(autoplay.getState().remaining, 1000)
+    // Snapback has no transition:end: the shared idle frame settles it.
+    phase = 'idle'
+    env.context.emit('render', { phase })
+    assert.equal(autoplay.getState().running, true)
+    env.advance(999)
+    assert.equal(env.nextCalls, 1)
+    env.advance(1)
+    assert.equal(env.nextCalls, 2)
+
+    env.viewport.dispatch('pointerdown', { pointerId: 2 })
+    env.view.dispatch('pointerup', { pointerId: 2 })
+    await Promise.resolve()
+    autoplay.destroy()
+    phase = 'idle'
+    env.context.emit('render', { phase })
+    assert.equal(env.timers.size, 0, 'removed autoplay must retire its temporary render subscription')
+  })
+}
+
+for (const completion of ['transition:end', 'render']) {
+  test(`installing autoplay during motion waits for ${completion}`, t => {
+    const env = environment(t, { manualTransition: true })
+    let phase = 'animation'
+    env.context.getRenderState = () => ({ phase })
+    const autoplay = env.install(createAutoplay({ interval: 1000 }))
+    assert.equal(autoplay.isActive(), true)
+    assert.equal(autoplay.getState().paused, true)
+    assert.equal(autoplay.getState().running, false)
+    env.advance(500)
+    assert.equal(autoplay.getState().remaining, 1000)
+    assert.equal(env.nextCalls, 0)
+
+    phase = 'idle'
+    env.context.emit(completion, completion === 'render' ? { phase } : { index: 0 })
+    assert.equal(autoplay.getState().running, true)
+    env.advance(999)
+    assert.equal(env.nextCalls, 0)
+    env.advance(1)
+    assert.equal(env.nextCalls, 1)
+  })
+}
+
 test('visibility, focus and overlapping pointer suspensions preserve a single timer', t => {
   const env = environment(t)
   const autoplay = env.install(createAutoplay({ interval: 1000, pauseOnInteraction: false }))
