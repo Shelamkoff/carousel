@@ -6,7 +6,7 @@
 
 Framework-agnostic, position-based carousel and slider with responsive layouts, loop mode, cancellable transitions, typed events, touch gestures, accessibility, and composable plugins. Published as an ESM package for modern browsers.
 
-[Live demo](https://shelamkoff.github.io/carousel/) · [npm](https://www.npmjs.com/package/@shelamkoff/carousel) · [Русская версия](./README.ru.md)
+[Live demo](https://shelamkoff.github.io/carousel/) · [Slide API playground](https://shelamkoff.github.io/carousel/demo-assets/api.html) · [npm](https://www.npmjs.com/package/@shelamkoff/carousel) · [Русская версия](./README.ru.md)
 
 ## Highlights
 
@@ -14,6 +14,8 @@ Framework-agnostic, position-based carousel and slider with responsive layouts, 
 - Loop mode, 14 built-in transitions, custom effects, keyboard control, touch and mouse gestures.
 - Arrows, dots, thumbnails, autoplay, lazy loading, swipe, and parallax plugins.
 - Framework-independent lifecycle, typed events, and TypeScript declarations.
+- Keyed slide updates, reordering and collection replacement that preserve unchanged content.
+- Custom numeric layouts and composable content effects on the shared render timeline.
 
 ## Installation
 
@@ -82,6 +84,7 @@ The container may be an `HTMLElement` or a CSS selector. A selector that does no
 
 ```ts
 interface SlideData {
+  id?: string | number
   content: string | HTMLElement | (() => HTMLElement)
   thumb?: string
   lazy?: boolean
@@ -93,6 +96,7 @@ interface SlideData {
 - An `HTMLElement` is **cloned** into the carousel with `cloneNode(true)`; listeners registered on the original element are not copied. Use a render function to attach interactive behavior to each rendered element.
 - A string is assigned as HTML and is therefore trusted developer input.
 - `thumb` is consumed by the thumbnails plugin, `lazy` by lazy loading, and `meta` remains application-owned metadata.
+- `id` is an optional stable identity for immutable collection updates. It must be a non-empty string or a finite number, unique within the collection; numeric `1` and string `'1'` are distinct. Without `id`, reconciliation uses the slide object's identity. See [changing slides](#changing-slides-without-remounting).
 
 ## Configuration
 
@@ -101,7 +105,7 @@ interface SlideData {
 | `slidesPerView` | `number` | `1` | Number of visible slides; positive fractions such as `1.15` and `2.25` are supported. |
 | `slidesPerScroll` | `number \| 'auto'` | `1` | Navigation step. `'auto'` uses the resolved visible count. |
 | `orientation` | `'horizontal' \| 'vertical'` | `'horizontal'` | Navigation, layout, keyboard, swipe and parallax axis. |
-| `layout` | `'standard' \| 'expand'` | `'standard'` | Expanding cards with coordinated caption movement, or ordinary equal-width slides. |
+| `layout` | `CarouselLayout` | `'standard'` | `'standard'`, `'expand'`, or a custom numeric geometry definition. |
 | `expandVisible` | `number` | `2.5` | Number of compact-card equivalents used by the expanding layout (fractions supported). |
 | `expandRatio` | `number` | `2.5` | Active-to-compact card size ratio; at least 1. |
 | `expandPeek` | `number` | `32` | Leading inset in pixels, limited to a quarter of the viewport. |
@@ -115,7 +119,7 @@ interface SlideData {
 | `breakpoints` | `Record<number, Partial<CarouselResponsiveOptions>>` | none | Options applied when the viewport is at least the numeric width. |
 | `plugins` | `CarouselPlugin[]` | `[]` | Plugins installed during construction. |
 
-Breakpoint values override base options. The carousel retains existing slide DOM nodes on breakpoint changes and when inserting/removing neighboring slides; an explicit `update()` re-renders slide content (including render callbacks). This makes breakpoint updates less disruptive, while `update()` can replace descendant nodes. Animations are disabled when the user prefers reduced motion (`prefers-reduced-motion: reduce`).
+Breakpoint values override base options. The carousel retains unchanged slide DOM on breakpoint changes, collection mutations and `update(options)`. **Migration:** `update()` no longer reruns content renderers. Use `refresh(index)` for one slide or `refresh()` for the collection when an explicit content reset is needed. Navigation animations are disabled when the user prefers reduced motion (`prefers-reduced-motion: reduce`).
 
 ```js
 const carousel = new Carousel('#gallery', slides, {
@@ -280,6 +284,92 @@ carousel.on('transition:error', ({ name, error }) => console.error(name, error))
 
 An optional `destroy()` releases resources created outside the layer, such as observers or third-party instances; the layer itself is removed automatically. Cleanup also runs on cancellation, failure, and if a factory synchronously updates or destroys the carousel before returning. A throwing factory must release any external resources it allocated before it could return a cleanup hook. Errors are reported through `transition:error`; setup/render failures settle the current destination immediately. A callback that has already updated or destroyed the carousel takes precedence, so obsolete work never completes afterward. Definitions and their renderers are trusted application code, like slide factories and plugins.
 
+## Custom layouts and content effects
+
+Three extension points can be combined: `layout` supplies slide geometry, `createSlideEffect()` animates slide contents, and `transition` draws a decorative cover during navigation. They use the core position and clock; no transform parsing or separate `requestAnimationFrame` loop is needed.
+
+### Numeric layout contract
+
+```js
+const compactLayout = {
+  name: 'compact',
+  render({ slides }) {
+    return slides.map(slide => ({
+      offset: slide.offset * 0.9,
+      size: slide.size * 0.85,
+      progress: slide.progress,
+    }))
+  },
+}
+
+carousel.update({ layout: compactLayout, slidesPerView: 1.6, transition: 'slide' })
+```
+
+`CarouselLayoutDefinition.render(context)` is synchronous. Its frozen input contains `position`, `step`, `viewportSize`, `gap`, `count`, `loop`, `orientation`, and an ordered `slides` array. Each visual slot contains `index`, `copy`, `isCopy`, `offset`, `size`, and `progress`; `copy: 0` is the original. Short loops can include inert visual copies of the same logical slide. The callback receives numbers and flags, without DOM nodes.
+
+Return one `{ offset, size, progress? }` record for **every input slot, in the same order**, including copies. `offset` is relative to the viewport's leading edge and `size` is the main-axis dimension, both in CSS pixels. Values must be finite and `size` must be non-negative. Omitted `progress` retains the canonical signed distance in logical slide steps. The core applies the geometry along the current horizontal or vertical axis.
+
+The layout changes visual geometry. `slidesPerView`, `gap` and `slidesPerScroll` still determine logical navigation, swipe distances, finite bounds and loop slots. Choose these options to match the intended visible range. A layout does not introduce a separate navigation model. Definitions can be used at construction, in `update()` and in breakpoints; `fade` requires `layout: 'standard'`.
+
+An invalid return or throwing callback emits `layout:error` and falls back to standard geometry until the next rebuild. The whole return is validated before any geometry is applied. Treat the callback as a pure calculation: avoid layout reads, asynchronous work and DOM changes inside it.
+
+### Effects on slide contents
+
+```js
+import { createSlideEffect, createFocusEffect } from '@shelamkoff/carousel'
+
+const captionEffect = createSlideEffect({
+  name: 'caption',
+  create({ setStyle }) {
+    return {
+      render(frame) {
+        for (const slide of frame.slides) {
+          const caption = slide.element.querySelector('.caption')
+          const distance = frame.reducedMotion ? 0 : (1 - slide.focus) * 24
+          setStyle(caption, 'translate', `0 ${distance}px`)
+          setStyle(caption, 'opacity', String(0.65 + slide.focus * 0.35))
+        }
+      },
+    }
+  },
+})
+
+carousel.use(captionEffect)
+const focusEffect = createFocusEffect({
+  selector: '.card', scale: 0.92, opacity: 0.7, offset: 12,
+})
+carousel.use(focusEffect)
+
+// Remove either effect and restore the inline properties it owns.
+carousel.unuse(captionEffect.name) // name is 'effect:caption'
+```
+
+An effect is a regular removable plugin. `create()` receives the carousel `root`, `viewport` and managed `setStyle(element, property, value)`. Return a synchronous `render(frame)` and optional `destroy()`. Rendering runs initially and on core updates, including navigation, dragging, resizing, lazy rendering and collection changes. It does not poll while idle.
+
+Use `setStyle` with CSS property names such as `'opacity'`, `'translate'` or `'--caption-focus'`. A `null` element is ignored; a `null` value releases that property. Ordinary CSS properties can be applied to owned content descendants. Core positioning elements—the root, viewport, track and slide wrappers—accept only CSS custom properties. Nested carousels and unrelated page elements are outside the effect's scope. Managed styles restore during rebuild, removal or failure; other active effect owners and newer application writes are preserved. Release properties from targets your effect stops using.
+
+`createFocusEffect()` is a ready-made example of this contract: inactive `scale` defaults to `0.9`, `opacity` to `0.6`, and cross-axis `offset` to `0`. Scale and opacity must be within `0…1`. Without `selector`, it targets each slide's direct children. An optional `name` permits several independently removable focus effects. Reduced motion disables its scale and displacement; custom effects should also check `frame.reducedMotion` for their own motion.
+
+Effect creation, rendering and cleanup must be synchronous. Creation or render failures emit `effect:error`, retire the failed effect renderer and restore its managed styles. Remove and reinstall the plugin to retry. `destroy()` must release external observers, listeners or other resources allocated by the effect; a throwing factory must clean up resources it allocated before it could return `destroy()`.
+
+### Render snapshots
+
+`carousel.getRenderState()` returns a frozen `CarouselRenderState` snapshot, or `null` after destruction. Subscribe to `render` for updates. It describes the latest core frame and contains live element references without reading their bounding rectangles:
+
+| Field | Meaning |
+| --- | --- |
+| `position`, `step`, `viewportSize`, `orientation` | Canonical position, navigation step, viewport main-axis size and axis. |
+| `index`, `selectedIndex`, `fromIndex` | Current logical position index, selected destination, and transition origin. |
+| `phase`, `direction`, `transitionProgress` | `'idle'`, `'drag'` or `'animation'`; direction `-1`, `0` or `1`; linear progress `0…1`, or `null` outside animation. |
+| `revision`, `reducedMotion` | Structural render revision and the current motion preference. |
+| `slides` | Ordered visual slots, including inert loop copies. Each exposes `element`, `index`, `copy`, `isCopy`, `offset`, `size`, `progress`, `focus` and `visible`. |
+
+`progress` is the signed distance from focus; `focus = max(0, 1 - abs(progress))`. `visible` is the intersecting fraction of the slot's size, not an occlusion or painted-pixel measurement. Use `isCopy` when attaching behavior: copies are decorative, and `getSlideElements()` returns originals only. Frozen snapshots do not freeze the referenced DOM elements. `render:reset` announces that structure or managed styles are about to be rebuilt; discard cached descendants then.
+
+Expand and custom layouts also expose `--carousel-slide-progress`, `--carousel-slide-focus` and the compatibility alias `--carousel-expand-focus` on their slide wrappers for CSS-driven content styling.
+
+[Try keyed mutations, custom geometry and effect toggles](https://shelamkoff.github.io/carousel/demo-assets/api.html).
+
 ## Theming
 
 Set `--carousel-*` properties on the element passed to `new Carousel()`, a theme wrapper, or `:root`. The generated carousel inherits them. Defaults are fallbacks at each use site, so a theme can be declared before or after the library stylesheet without `!important` or selectors tied to the internal markup.
@@ -357,6 +447,7 @@ Keep slide geometry in the JavaScript options: `gap`, `slidesPerView`, `slidesPe
 | Method | Result | Description |
 | --- | --- | --- |
 | `use(plugin)` | `this` | Installs a plugin. Plugin names must be unique. |
+| `unuse(name)` | `boolean` | Removes a plugin and runs cleanup; returns `false` if no such plugin is installed. |
 | `getPlugin(name)` | plugin or `undefined` | Returns the installed public plugin object. |
 | `next()` / `prev()` | `void` | Moves by the resolved scroll step. |
 | `goTo(index)` | `void` | Navigates to a logical slide index. |
@@ -364,9 +455,17 @@ Keep slide geometry in the JavaScript options: `gap`, `slidesPerView`, `slidesPe
 | `getRealIndex()` | `number` | Alias for `getIndex()`, retained for integrations. |
 | `getSlide(index?)` | slide or `null` | Returns a logical slide; omitting the index returns the current slide. |
 | `getSlides()` | `SlideData[]` | Returns a defensive array copy of slides. |
+| `getSlideCount()` | `number` | Number of logical slides, excluding decorative copies. |
+| `getSlideElement(index?)` | element or `null` | Returns the original slide wrapper; defaults to the current logical slide. |
+| `getSlideElements()` | `HTMLElement[]` | Defensive array of original slide wrappers in collection order. |
+| `getRenderState()` | snapshot or `null` | Latest immutable numeric frame with references to visual elements. |
+| `updateSlide(index, patch)` | `void` | Shallow-merges supplied fields. Content replacement affects only that slide; `id` stays fixed. |
+| `moveSlide(from, to)` | `void` | Moves a slide to its final array index and retains the selected slide by identity. |
+| `setSlides(slides)` | `void` | Reconciles the collection by `id`, or object identity for slides without an `id`. |
+| `refresh(index?)` | `void` | Explicitly resets one slide's content, or the whole collection when omitted. Lazy slides render again when requested. |
 | `addSlide(slide, index?)` | `void` | Adds a slide and rebuilds the layout. |
 | `removeSlide(index)` | `void` | Removes a logical slide and keeps the remaining index valid. |
-| `update(options)` | `void` | Updates layout and behavior. `plugins` and `startIndex` are intentionally rejected. |
+| `update(options)` | `void` | Updates layout and behavior while retaining unchanged content. `plugins` and `startIndex` are rejected. |
 | `on(event, handler)` | unsubscribe function | Subscribes to an event. |
 | `off(event, handler)` | `void` | Removes the exact handler. |
 | `once(event, handler)` | unsubscribe function | Subscribes for one emission. |
@@ -374,10 +473,38 @@ Keep slide geometry in the JavaScript options: `gap`, `slidesPerView`, `slidesPe
 
 Do not call methods after `destroy()`. Create a new instance if the host needs to mount the carousel again.
 
+### Changing slides without remounting
+
+```js
+// Give slides stable ids when the application produces new data objects.
+const slides = [
+  { id: 'forest', content: renderForest, meta: { title: 'Forest' } },
+  { id: 'coast', content: renderCoast, meta: { title: 'Coast' } },
+]
+const carousel = new Carousel('#gallery', slides, { loop: true })
+
+carousel.updateSlide(0, { meta: { title: 'Updated title' } }) // retains content
+carousel.updateSlide(1, { content: renderNewCoast })          // replaces only coast
+carousel.moveSlide(0, 1)                                    // final order: coast, forest
+carousel.setSlides(carousel.getSlides().reverse().map(slide => ({ ...slide })))
+carousel.update({ gap: 24 })                                // retains content
+carousel.refresh(carousel.getIndex())                       // resets selected content
+```
+
+`renderForest`, `renderCoast` and `renderNewCoast` above are application functions returning an `HTMLElement`. For a retained identity, `setSlides()` keeps content when its `content` value/reference is unchanged. New inline render functions count as changed content, even if they produce the same markup. Metadata-only patches preserve input values and listeners; `meta` is replaced as a whole, not recursively merged. Supplying `content` to `updateSlide()` deliberately refreshes that slide, even if its value/reference is unchanged. Use mutations rather than editing objects returned by getters; the returned array is copied, its slide objects are not deep-cloned.
+
+Ids cannot be changed by `updateSlide()`. Use `setSlides()` to replace an identity. Duplicate or invalid ids reject the mutation. `updateSlide()`, `moveSlide()` and indexed `refresh()` require existing non-negative integer indices and throw `RangeError` otherwise. `moveSlide()` uses the final index after removal and does nothing when both indices match. `addSlide()` appends by default; a supplied integer is clamped to `0…count`. `removeSlide()` ignores invalid indices.
+
+Reordering and reconciliation retain the selected identity when possible. Removing it selects the item at the previous index, clamped to the available range and finite navigation bounds. `setSlides([])` is supported, and slides can be added afterward. Mutations cancel an active transition, rebuild synchronously and emit `slides:change`; observe that event for collection changes rather than expecting `slide:change` navigation events. Original wrapper elements are reused for retained identities; content replacement or `refresh()` intentionally replaces their descendants. Where available, native atomic DOM moves also retain browser-managed state during reordering.
+
 ## Events
 
 | Event | Payload |
 | --- | --- |
+| `slides:change` | `{ type, previousCount, count, index }`; `type` is `'add'`, `'remove'`, `'update'`, `'move'`, `'set'` or `'refresh'`. |
+| `render` | `CarouselRenderState`; shared core frame for position-driven effects. |
+| `render:reset` | No payload; discard cached content/geometry before a rebuild. |
+| `layout:error` / `effect:error` | `{ name, error }`; failed custom layout or content effect. |
 | `slide:beforeChange` | `{ fromIndex, toIndex }` |
 | `slide:change` | `{ index, prevIndex, slide }` |
 | `transition:start` | `{ fromIndex, toIndex }` |
@@ -408,7 +535,7 @@ Use `createArrows({ hideOnIdle: true })` to slide arrows out towards their respe
 
 Tabbing or focusing a control in an off-screen slide brings that slide into view immediately, keeping the logical index, native scroll and rendered position synchronized. Live inputs, values, listeners and Shadow DOM are preserved. Focusing an already-visible control keeps the current multi-slide page. This behavior is part of the core and does not require the keyboard plugin.
 
-Install a plugin in `plugins` or with `use()` before destroying the carousel. A stateful plugin instance may belong to only one live carousel; create a fresh plugin object for every concurrent carousel.
+Install a plugin in `plugins` or with `use()`, and remove it with `unuse(plugin.name)`. Removal runs `destroy()`, unsubscribes owned callbacks and revokes the retired context's mutation commands, so queued callbacks cannot keep controlling the carousel. A removed instance can be installed again. A stateful plugin instance may belong to only one live carousel; create a fresh plugin object for every concurrent carousel.
 
 ## Creating a plugin
 
@@ -432,6 +559,7 @@ export function createProgressPlugin() {
 
       context.getRoot()?.append(element)
       context.on('slide:change', render)
+      context.on('slides:change', render)
       context.on('resize', render)
       render()
     },
@@ -444,7 +572,7 @@ export function createProgressPlugin() {
 }
 ```
 
-The frozen context exposes owned event subscriptions, navigation commands, read-only state and resolved options, live DOM getters, position methods for gesture/effect plugins, and `refreshLayout()`. `getPlugin(name)` returns an already installed optional plugin or `undefined`. Context subscriptions are removed automatically. The plugin must still release its own DOM, global listeners, observers, timers, animation frames, object URLs, and third-party instances in `destroy()`.
+The frozen context exposes owned event subscriptions, navigation and collection commands, read-only state and resolved options, live DOM getters, position methods for gesture/effect plugins, `getRenderState()` and `refreshLayout()`. `getPlugin(name)` returns an already installed optional plugin or `undefined`. Context subscriptions are removed automatically. The plugin must still release its own DOM, global listeners, observers, timers, animation frames, object URLs, and third-party instances in `destroy()`.
 
 If `install()` throws, the carousel rolls back context subscriptions and invokes the plugin cleanup. Make `destroy()` safe after partial installation.
 
@@ -461,6 +589,8 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 ## Demo
 
 [Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive horizontal/vertical layouts, fractional `1.15` / `2.25` views, themed playback controls, time progress, slide counters, autoplay, fade, thumbnails, parallax, custom themes, hover-reveal arrows, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, all 12 cover transitions and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
+
+The [Slide API playground](https://shelamkoff.github.io/carousel/demo-assets/api.html) demonstrates targeted content and metadata updates, keyed immutable collection replacement, reordering, explicit refresh, custom geometry and removable caption/focus/parallax effects. Type in a card to inspect state preservation while changing the collection and layout.
 
 GitHub Pages is published by `.github/workflows/pages.yml` on pushes to `master`, the configured Pages source branch. The workflow tests and builds the project, then stages only `index.html`, runtime JavaScript, CSS and demo assets through `scripts/build-pages.mjs`. It deploys a static artifact without Jekyll. `/version.json` records the deployed commit SHA. Generated staging directories live outside the repository.
 

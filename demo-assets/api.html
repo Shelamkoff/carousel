@@ -17,7 +17,8 @@
     button, select, input { font: inherit; }
     button, select { padding: 8px 12px; border: 1px solid #b9c3d3; border-radius: 4px; background: white; color: inherit; }
     button { cursor: pointer; }
-    button:hover { background: #e8edf4; }
+    button:hover:not(:disabled) { background: #e8edf4; }
+    button:disabled { cursor: default; opacity: .5; }
     :focus-visible { outline: 2px solid #4357b4; outline-offset: 3px; }
     #gallery { --carousel-radius: 8px; --carousel-expand-height: 340px; padding: 16px; background: #e1e8f1; border-radius: 8px; }
     .api-card { position: relative; height: 340px; overflow: hidden; border-radius: 8px; background: #1c3454; color: white; }
@@ -39,7 +40,7 @@
   <a href="../">All carousel examples</a>
   <h1>Slide API playground</h1>
   <p>Type into a card, reorder the collection, or change its layout. Unchanged content keeps its DOM and input values. Content replacement and explicit refresh affect only the selected card.</p>
-  <div class="settings" aria-label="Layout and effects">
+  <div class="settings" role="group" aria-label="Layout and effects">
     <label><span id="layout-label">Layout</span> <select id="layout" aria-labelledby="layout-label"><option value="standard">Standard</option><option value="expand" selected>Expand</option><option value="custom">Custom compact stack</option></select></label>
     <label><span id="orientation-label">Orientation</span> <select id="orientation" aria-labelledby="orientation-label"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label>
     <label><input id="focus-effect" type="checkbox"> Focus effect</label>
@@ -48,7 +49,7 @@
   </div>
   <div id="gallery"></div>
   <output id="status" aria-live="polite"></output>
-  <div class="actions" aria-label="Collection actions">
+  <div class="actions" role="group" aria-label="Collection actions">
     <button id="move" type="button">Move selected to end</button>
     <button id="reverse" type="button">Reverse immutable list</button>
     <button id="metadata" type="button">Update metadata</button>
@@ -102,7 +103,14 @@
   const log = []
   function show(message) {
     const slide = carousel.getSlide()
-    document.getElementById('status').textContent = `${carousel.getSlideCount()} cards · selected id ${slide?.id ?? 'none'} · index ${carousel.getIndex()}`
+    const count = carousel.getSlideCount()
+    const index = carousel.getIndex()
+    document.getElementById('status').textContent = `${count} ${count === 1 ? 'card' : 'cards'} · selected id ${slide?.id ?? 'none'} · index ${index}`
+    for (const id of ['metadata', 'replace', 'refresh', 'remove']) {
+      document.getElementById(id).disabled = !slide
+    }
+    document.getElementById('move').disabled = !slide || index === count - 1
+    document.getElementById('reverse').disabled = count < 2
     if (message) { log.unshift(message); log.length = Math.min(log.length, 4) }
     document.getElementById('events').textContent = log.join('\n')
   }
