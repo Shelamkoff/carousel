@@ -288,3 +288,32 @@ test('autoplay teardown notifies application listeners and plugins whose scope i
   assert.deepEqual(stops, { application: 1, plugin: 1 })
   assert.equal(autoplay.isActive(), false)
 })
+
+for (const count of [0, 2]) {
+  test(`snap-back from a collection reset waits for the rebuilt ${count}-slide loop`, async t => {
+    let context
+    const { carousel } = mount(t, [{ name: 'reset-snap-back', install(value) { context = value } }])
+    carousel.update({ loop: true, transitionDuration: 0 })
+    const changes = []
+    carousel.on('slide:change', value => changes.push(value))
+    const replacements = Array.from({ length: count }, (_, index) => ({
+      id: `replacement-${index}`, content: `Replacement ${index}`,
+    }))
+    carousel.once('render:reset', () => context.snapBack(Math.max(0, count - 1)))
+
+    carousel.setSlides(replacements)
+
+    assert.equal(carousel.getSlideCount(), count)
+    assert.equal(carousel.getSlideElements().length, count,
+      'the pending snap-back must not cancel the collection rebuild')
+    assert.deepEqual(carousel.getSlideElements().map(element => element.markup),
+      replacements.map(slide => slide.content))
+    await Promise.resolve()
+    assert.equal(carousel.getIndex(), Math.max(0, count - 1))
+    const state = carousel.getRenderState()
+    assert.equal(state.phase, 'idle')
+    assert.equal(state.slides.length, count)
+    assert.equal(Number.isFinite(state.position), true)
+    assert.deepEqual(changes, [], 'settling the reset must not emit a navigation change')
+  })
+}

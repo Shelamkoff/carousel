@@ -2308,3 +2308,62 @@ test('settlement and stopAnimation expose idle snapshots rather than stale anima
     assert.equal(carousel.getRenderState().position, before)
   } finally { carousel.destroy() }
 })
+
+test('a newer snap-back owns the animation until its own completion', () => {
+  const probe = { name: 'snap-clock', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(100, 5, { transitionDuration: 100, plugins: [probe] })
+  try {
+    probe.ctx.setPositionDrag(160)
+    probe.ctx.snapBack(0)
+    frame(25)
+    probe.ctx.snapBack(2)
+    frame(75)
+    const state = carousel.getRenderState()
+    assert.equal(state.phase, 'animation', 'the older completion must not settle the newer motion')
+    assert.equal(state.selectedIndex, 2)
+    frame(25)
+    assert.equal(carousel.getRenderState().position, 200)
+    assert.equal(carousel.getRenderState().phase, 'idle')
+  } finally { carousel.destroy() }
+})
+
+for (const loop of [false, true]) {
+  test(`snap-back preserves its logical destination in a zero-width ${loop ? 'loop' : 'finite'} viewport`, () => {
+    const probe = { name: 'snap-hidden', install(ctx) { this.ctx = ctx } }
+    const { carousel, host } = mount(0, 5, { loop, plugins: [probe] })
+    try {
+      probe.ctx.snapBack(2)
+      assert.equal(carousel.getIndex(), 2)
+      host.width = 100
+      ResizeObserver.flush()
+      frame(16)
+      assert.equal(carousel.getIndex(), 2)
+      assert.equal(carousel.getRenderState().position, 200)
+    } finally { carousel.destroy() }
+  })
+}
+
+for (const transition of ['fade', 'stairs']) {
+  test(`snap-back cancels the resources and completion of an active ${transition} transition`, () => {
+    const probe = { name: 'snap-transition', install(ctx) { this.ctx = ctx } }
+    const { carousel, viewport, track } = mount(100, 5, {
+      transition, transitionDuration: 100, plugins: [probe],
+    })
+    const changes = []
+    carousel.on('slide:change', event => changes.push(event))
+    try {
+      carousel.goTo(3)
+      frame(25)
+      probe.ctx.snapBack(1)
+      assert.equal(viewport.children.length, 1, 'the cancelled overlay must be removed')
+      frame(100)
+      assert.equal(carousel.getRenderState().position, 100)
+      assert.equal(carousel.getRenderState().phase, 'idle')
+      assert.deepEqual(changes, [], 'cancelled navigation must not complete during snap-back')
+      if (transition === 'fade') {
+        assert.ok(track.children.every(slide => slide.style.position === ''),
+          'fade must restore the finite layout before snap-back')
+      }
+    } finally { carousel.destroy() }
+  })
+}

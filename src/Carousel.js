@@ -461,6 +461,7 @@ export class Carousel {
             if (this.#queuedNavigation !== queued) return
             this.#queuedNavigation = null
             if (queued.relativeDirection) this.#navigateRelative(queued.relativeDirection)
+            else if (queued.snapBack) this.#animateSnapBack(queued.index, queued.durationOverride)
             else this.#navigate(queued.index, queued.direction, queued.fromIndex, queued.startPosition, queued.durationOverride)
           })
         }
@@ -528,15 +529,7 @@ export class Carousel {
       goToAfterDrag: (i, startIndex, direction, startPosition) => {
         this.#navigate(i, direction, startIndex, startPosition)
       },
-      snapBack: (index) => {
-        const logical = index ?? this.getIndex()
-        const targetPos = this.#loop
-          ? this.#position + this.#loop.shortestDelta(this.#position, logical)
-          : Math.max(0, Math.min(logical, this.#maxIndex(),
-              this.#slideManager.getSlideCount() - (this.#resolvedOptions.slidesPerView ?? 1),
-            )) * this.#step()
-        this.#animateSnapBack(targetPos, this.#duration())
-      },
+      snapBack: index => this.#animateSnapBack(index ?? this.getIndex(), this.#duration()),
 
       // Keep the rendered position unless a deferred layout has changed
       // its coordinate system. Gesture callers read their origin afterward.
@@ -695,7 +688,7 @@ export class Carousel {
         ? this.#position + this.#loop.shortestDelta(this.#position, index)
         : Math.min(index, Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1))) * this.#step()
       if (Math.abs(targetPos - this.#position) > 0.01) {
-        this.#animateSnapBack(targetPos, durationOverride ?? this.#duration())
+        this.#animateSnapBack(index, durationOverride ?? this.#duration())
       }
       return
     }
@@ -845,13 +838,36 @@ export class Carousel {
 
   /**
    * Settle an aborted drag without emitting slide:change.
-   * @param {number} targetPos
+   * @param {number} index
    * @param {number} duration
    */
-  #animateSnapBack(targetPos, duration) {
-    this.#selectedIndex = this.#loop
-      ? this.#loop.toIndex(targetPos)
-      : this.#finiteIndex(this.#step(), targetPos)
+  #animateSnapBack(index, duration) {
+    if (this.#destroyed) return
+    if (!Number.isInteger(index)) throw new TypeError('Carousel: snap-back index must be an integer')
+    if (this.#notifying) {
+      this.#queuedNavigation = { snapBack: true, index, durationOverride: duration }
+      return
+    }
+    this.#queuedNavigation = null
+    // Gesture commands can supersede another snap-back or a decorative
+    // transition. Retire its clock and resources before taking ownership.
+    const epoch = this.#stopAllAnimations()
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
+    if (this.#pendingResize) {
+      this.#applyResize(this.#pendingResizeStep ?? this.#step())
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
+    }
+    const count = this.#slideManager.getSlideCount()
+    // Keep the logical destination even when a hidden viewport has zero step.
+    const targetIndex = this.#loop
+      ? ((index % count) + count) % count
+      : Math.max(0, Math.min(index, this.#maxIndex()))
+    const targetPos = this.#loop
+      ? this.#position + this.#loop.shortestDelta(this.#position, targetIndex)
+      : Math.max(0, Math.min(targetIndex,
+          count - (this.#resolvedOptions.slidesPerView ?? 1),
+        )) * this.#step()
+    this.#selectedIndex = targetIndex
     this.#prevIndex = this.#selectedIndex
     this.#runPositionAnimation(targetPos, duration, () => {
       this.#animating = false
