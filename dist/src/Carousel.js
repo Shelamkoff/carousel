@@ -607,7 +607,7 @@ export class Carousel {
           rendered = this.#trackRenderer.renderSlide(i, slide)
           if (!this.#destroyed && this.#navigationEpoch === epoch) this.#render()
         }, true)
-        return rendered
+        return rendered && !this.#destroyed && this.#navigationEpoch === epoch
       },
       refreshLayout: () => this.#trackRenderer.refreshLayout(),
     }, event => event !== 'render:reset' || this.#activeReset === null

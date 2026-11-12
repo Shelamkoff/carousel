@@ -105,19 +105,26 @@ export function createLazyLoad(options = {}) {
       if (!viewport) return
       const Observer = viewport.ownerDocument?.defaultView?.IntersectionObserver ?? globalThis.IntersectionObserver
 
-      observer = new Observer(
+      const installedObserver = new Observer(
         (entries) => {
           for (const entry of entries) {
+            if (ctx !== context || observer !== installedObserver) return
             if (!entry.isIntersecting) continue
             const el = /** @type {HTMLElement} */ (entry.target)
-            if (el.dataset.loaded === 'true' || el.dataset.loaded === 'error') { observer?.unobserve(el); continue }
+            if (el.dataset.loaded === 'true' || el.dataset.loaded === 'error') { installedObserver.unobserve(el); continue }
             const idx = parseInt(el.dataset.index ?? '-1', 10)
             if (idx >= 0) loadSlide(el, idx)
-            observer?.unobserve(el)
+            if (ctx !== context || observer !== installedObserver) return
+            // A nested rebuild can retain this wrapper and observe its new
+            // pending content. Do not remove that newer observation on cancel.
+            const currentIndex = parseInt(el.dataset.index ?? '-1', 10)
+            if (el.dataset.loaded === 'true' || el.dataset.loaded === 'error'
+              || el !== context.getSlideElement(currentIndex)) installedObserver.unobserve(el)
           }
         },
         { root: viewport, rootMargin, threshold: observerThreshold },
       )
+      observer = installedObserver
 
       observeLazySlides()
       preloadAdjacent()
