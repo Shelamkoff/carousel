@@ -54,3 +54,36 @@ test('API playground supports an empty collection and adding a new card afterwar
   await expect(note).toHaveValue('New draft after clearing')
   expect(errors).toEqual([])
 })
+
+test('API playground exercises variable geometry, owned cleanup and surface transitions', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.goto('/demo-assets/api.html')
+  await expect(page.locator('body')).toHaveAttribute('data-status', 'pass')
+  const resources = page.locator('#resources')
+  await expect(resources).toHaveAttribute('data-live', '4')
+  await expect(resources).toHaveAttribute('data-cleanups', '0')
+
+  await page.getByLabel('Layout', { exact: true }).selectOption('variable')
+  const sizes = await page.locator('#gallery .carousel__slide:not([data-carousel-copy])').evaluateAll(slides =>
+    slides.map(slide => slide.getBoundingClientRect().width))
+  expect(sizes.length).toBe(4)
+  expect(Math.abs(sizes[0] - sizes[1])).toBeGreaterThan(30)
+
+  const note = page.getByLabel('Note for card 1', { exact: true })
+  await note.fill('Owned content survives navigation')
+  for (const transition of ['crossfade', 'page-turn']) {
+    await page.getByLabel('Transition', { exact: true }).selectOption(transition)
+    await page.getByRole('button', { name: 'Next slide', exact: true }).click()
+    await expect(page.locator('#status')).toContainText(transition === 'crossfade' ? 'selected id 1' : 'selected id 2')
+    await expect(resources).toHaveAttribute('data-cleanups', '0')
+  }
+  await expect(note).toHaveValue('Owned content survives navigation')
+  await page.getByRole('button', { name: 'Refresh selected', exact: true }).click()
+  await expect(resources).toHaveAttribute('data-live', '4')
+  await expect(resources).toHaveAttribute('data-cleanups', '1')
+  await page.getByRole('button', { name: 'Remove selected', exact: true }).click()
+  await expect(resources).toHaveAttribute('data-live', '3')
+  await expect(resources).toHaveAttribute('data-cleanups', '2')
+  expect(errors).toEqual([])
+})

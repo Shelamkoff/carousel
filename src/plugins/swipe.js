@@ -1,4 +1,5 @@
 import { getLastSlideIndex } from '../navigation.js'
+import { navigationTarget } from './navigation.js'
 
 /**
  * Swipe plugin — position-first drag.
@@ -46,6 +47,7 @@ export function createSwipe(options = {}) {
   let cachedPerView = 1
   let cachedPointerId = -1
   let cachedVertical = false
+  let cachedGeometry = null
 
   /** @type {((e: PointerEvent) => void) | null} */
   let onDown = null
@@ -64,6 +66,7 @@ export function createSwipe(options = {}) {
   let abortController = null
 
   function cancelDrag() {
+    cachedGeometry = null
     if (!dragging) return
     suppressClick ||= trackMoved
     dragging = false
@@ -118,6 +121,7 @@ export function createSwipe(options = {}) {
         cachedStep = context.getStep()
         cachedN = context.getSlideCount()
         cachedPerView = context.getSlidesPerView()
+        cachedGeometry = context.getNavigationGeometry?.() ?? null
         cachedVertical = context.options?.orientation === 'vertical'
 
       }
@@ -150,7 +154,7 @@ export function createSwipe(options = {}) {
         let newPos = startPosition - delta
 
         if (!cachedLoop) {
-          const maxPos = Math.max(0, cachedN - cachedPerView) * cachedStep
+          const maxPos = cachedGeometry?.maxPosition ?? Math.max(0, cachedN - cachedPerView) * cachedStep
           if (newPos < 0) newPos = newPos * resistance
           else if (newPos > maxPos) newPos = maxPos + (newPos - maxPos) * resistance
         }
@@ -162,6 +166,8 @@ export function createSwipe(options = {}) {
       onUp = /** @param {PointerEvent} e */ (e) => {
         if (!dragging || e.pointerId !== cachedPointerId) return
         dragging = false
+        const geometry = cachedGeometry
+        cachedGeometry = null
 
         if (viewport && cachedPointerId >= 0) {
           try { viewport.releasePointerCapture(cachedPointerId) } catch (_) {}
@@ -176,7 +182,7 @@ export function createSwipe(options = {}) {
 
         const delta = cachedVertical ? e.clientY - startY : e.clientX - startX
 
-        if (Math.abs(delta) < threshold || cachedStep <= 0) {
+        if (Math.abs(delta) < threshold || (geometry ? geometry.loopLength <= 0 : cachedStep <= 0)) {
           context.snapBack(startIndex)
           return
         }
@@ -184,22 +190,24 @@ export function createSwipe(options = {}) {
         const pos = context.getPosition()
         const engine = context.getLoopEngine()
         const perScroll = context.getSlidesPerScroll()
+        const pageScroll = perScroll > 1
+          || context.options?.slidesPerScroll === 'auto' && geometry && !geometry.uniform
         const direction = delta < 0 ? 1 : -1
         let targetIdx
 
-        if (perScroll > 1) {
+        if (pageScroll) {
           // Exactly one scroll step from the index at pointerdown.
-          const step = cachedLoop ? perScroll % cachedN : perScroll
-          targetIdx = startIndex + direction * step
+          targetIdx = navigationTarget(context, direction, startIndex)
         } else {
-          targetIdx = engine ? engine.toIndex(pos) : Math.round(pos / cachedStep)
-          if (targetIdx === startIndex) targetIdx += direction
+          targetIdx = geometry ? geometry.positionToIndex(pos, cachedLoop)
+            : engine ? engine.toIndex(pos) : Math.round(pos / cachedStep)
+          if (targetIdx === startIndex) targetIdx = navigationTarget(context, direction, startIndex)
         }
 
         if (cachedLoop) {
           targetIdx = ((targetIdx % cachedN) + cachedN) % cachedN
         } else {
-          const maxIdx = getLastSlideIndex(cachedN, cachedPerView)
+          const maxIdx = geometry?.lastIndex ?? getLastSlideIndex(cachedN, cachedPerView)
           targetIdx = Math.max(0, Math.min(targetIdx, maxIdx))
         }
 
@@ -208,7 +216,7 @@ export function createSwipe(options = {}) {
           return
         }
 
-        context.goToAfterDrag(targetIdx, startIndex, perScroll > 1 ? direction : undefined, startPosition)
+        context.goToAfterDrag(targetIdx, startIndex, pageScroll ? direction : undefined, startPosition)
       }
 
       onCancel = e => {

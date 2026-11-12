@@ -9,8 +9,10 @@ import { TrackRenderer } from './TrackRenderer.js'
 import { LoopEngine } from './LoopEngine.js'
 import { BreakpointManager } from './BreakpointManager.js'
 import { isHTMLElement } from './dom.js'
-import { getLastSlideIndex } from './navigation.js'
+import { getNavigationTarget, getPageTargets } from './navigation.js'
+import { getLayoutSizing } from './layouts.js'
 import { ViewportTransition, isViewportTransition } from './transitions/ViewportTransition.js'
+import { SurfaceTransition, isSurfaceTransition } from './transitions/SurfaceTransition.js'
 
 const ownedPluginInstances = new WeakSet()
 
@@ -27,6 +29,7 @@ export class Carousel {
   #trackRenderer
   /** @type {LoopEngine | null} */
   #loop = null
+  #geometry = null
   #breakpointManager
   #options
   #resolvedOptions
@@ -107,6 +110,9 @@ export class Carousel {
       this.#trackRenderer.onLayoutError((name, error) => {
         this.#dispatchEvents(() => this.#events.emit('layout:error', { name, error }))
       })
+      this.#trackRenderer.onGeometryError((name, error) => {
+        this.#dispatchEvents(() => this.#events.emit('geometry:error', { name, error }))
+      })
 
       if (options.plugins) {
         for (const plugin of options.plugins) this.use(plugin)
@@ -122,7 +128,9 @@ export class Carousel {
   #trackLayout() {
     const opts = this.#resolvedOptions
     return {
-      slidesPerView: opts.layout === 'expand' ? opts.expandVisible : opts.slidesPerView ?? 1,
+      ...getLayoutSizing(opts),
+      logicalSlidesPerView: opts.slidesPerView ?? 1,
+      geometry: opts.geometry,
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
       ariaLabel: opts.ariaLabel,
@@ -146,21 +154,23 @@ export class Carousel {
       : this.#loop
         ? startIndex % count
         : Math.min(startIndex, this.#maxIndex())
-    this.#position = this.#selectedIndex * this.#step()
+    this.#position = this.#geometry.indexToPosition(this.#selectedIndex, !!this.#loop)
     this.#render()
 
     this.#trackRenderer.onResize((previousSlideSize) => {
       const previousStep = previousSlideSize + this.#trackRenderer.gap
-      if (this.#viewportTransition) {
+      if (this.#viewportTransition || this.#resolvedOptions.geometry) {
         // A responsive geometry change settles the pending destination and
         // retires the decorative panels before publishing the resized state.
-        const targetIndex = this.#selectedIndex
+        const targetIndex = this.#animating ? this.#selectedIndex : this.getIndex()
+        const wasAnimating = this.#animating
         const epoch = this.#stopAllAnimations()
         if (this.#destroyed || this.#navigationEpoch !== epoch) return
         this.#pendingResize = true
         this.#pendingResizeStep = previousStep
-        this.#position = targetIndex * previousStep
-        this.#onAnimationComplete()
+        this.#selectedIndex = targetIndex
+        if (wasAnimating) this.#onAnimationComplete()
+        else this.#applyResize(previousStep, targetIndex)
         return
       }
       if (this.#animating) {
@@ -242,18 +252,29 @@ export class Carousel {
 
   /** @param {number} [previousStep] @param {number} [targetIndex] */
   #applyResize(previousStep = this.#step(), targetIndex) {
-    const idx = targetIndex ?? (previousStep <= 0
-      ? this.#selectedIndex
-      : this.#loop
-        ? this.#loop.toIndex(this.#position)
-        : this.#finiteIndex(previousStep))
+    const idx = targetIndex ?? this.getIndex()
+    const epoch = this.#navigationEpoch
     this.#pendingResize = false
     this.#pendingResizeStep = null
-    this.#initLoop()
-    this.#position = idx * this.#step()
-    if (!this.#render()) return
-    this.#selectedIndex = this.getIndex()
-    this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
+    const apply = () => {
+      if (this.#resolvedOptions.geometry) {
+        // Physical measurements may change both snap points and copy coverage.
+        // Reconcile retained content after retiring any frame-owned styles.
+        this.#resetRender()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        if (!this.#trackRenderer.refreshCopies()) return
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+      }
+      this.#initLoop()
+      this.#selectedIndex = idx
+      this.#position = this.#geometry.indexToPosition(idx, !!this.#loop)
+      if (!this.#render()) return
+      this.#selectedIndex = this.getIndex()
+      this.#rebuilding = false
+      this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
+    }
+    if (this.#resolvedOptions.geometry) this.#dispatchEvents(apply, true)
+    else apply()
   }
 
   /** @returns {number} resolved slidesPerScroll */
@@ -271,9 +292,10 @@ export class Carousel {
   }
 
   #initLoop() {
+    this.#geometry = this.#trackRenderer.getNavigationGeometry()
     const N = this.#slideManager.getSlideCount()
     if (this.#resolvedOptions.loop && N > 0) {
-      this.#loop = new LoopEngine(N, this.#step())
+      this.#loop = new LoopEngine(this.#geometry)
     } else {
       this.#loop = null
     }
@@ -290,8 +312,7 @@ export class Carousel {
   #render(clamp = true, phase = this.#animating ? 'animation' : 'idle') {
     if (this.#destroyed) return false
     if (!this.#loop && clamp) {
-      const maxPos = Math.max(0, this.#slideManager.getSlideCount()
-        - (this.#resolvedOptions.slidesPerView ?? 1)) * this.#step()
+      const maxPos = this.#trackRenderer.getNavigationGeometry()?.maxPosition ?? 0
       this.#position = Math.max(0, Math.min(this.#position, maxPos))
     }
     const epoch = this.#navigationEpoch
@@ -358,7 +379,7 @@ export class Carousel {
       this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout())
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()
-      this.#position = oldIdx * this.#step()
+      this.#position = this.#geometry.indexToPosition(oldIdx, !!this.#loop)
       this.#selectedIndex = oldIdx
       if (!this.#render()) return
       this.#selectedIndex = this.getIndex()
@@ -560,6 +581,10 @@ export class Carousel {
       },
       getStep: () => this.#step(),
       getLoopEngine: () => this.#loop,
+      getNavigationGeometry: () => this.getNavigationGeometry(),
+      getNavigationTarget: (direction, fromIndex = this.getIndex()) =>
+        getNavigationTarget(this.#geometry, this.#resolvedOptions, fromIndex, direction),
+      getPageTargets: (anchorIndex = 0) => getPageTargets(this.#geometry, this.#resolvedOptions, anchorIndex),
       getPlugin: name => this.getPlugin(name),
 
       getIndex: () => this.getIndex(),
@@ -609,12 +634,6 @@ export class Carousel {
 
   /* ═══════════════ Navigation ═══════════════ */
 
-  #navigationStep() {
-    const step = this.#perScroll()
-    const count = this.#slideManager.getSlideCount()
-    return this.#loop && count > 0 ? step % count : step
-  }
-
   /** @param {1 | -1} direction */
   #navigateRelative(direction) {
     if (this.#destroyed) return
@@ -625,7 +644,7 @@ export class Carousel {
       this.#queuedNavigation = { relativeDirection: direction }
       return
     }
-    this.#navigate(this.getIndex() + direction * this.#navigationStep(), direction)
+    this.#navigate(getNavigationTarget(this.#geometry, this.#resolvedOptions, this.getIndex(), direction), direction)
   }
 
   next() { this.#navigateRelative(1) }
@@ -686,7 +705,7 @@ export class Carousel {
     if (index === previous) {
       const targetPos = loop
         ? this.#position + this.#loop.shortestDelta(this.#position, index)
-        : Math.min(index, Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1))) * this.#step()
+        : this.#geometry.indexToPosition(index)
       if (Math.abs(targetPos - this.#position) > 0.01) {
         this.#animateSnapBack(index, durationOverride ?? this.#duration())
       }
@@ -713,15 +732,12 @@ export class Carousel {
         : this.#position + (direction
           ? this.#loop.directedDelta(this.#position, index, direction)
           : this.#loop.shortestDelta(this.#position, index))
-      : Math.min(
-          index * this.#step(),
-          Math.max(0, count - (this.#resolvedOptions.slidesPerView ?? 1)) * this.#step(),
-        )
+      : this.#geometry.indexToPosition(index)
 
     const duration = durationOverride ?? this.#duration()
     this.#selectedIndex = index
     this.#transitionDirection = Math.sign(targetPos - this.#position)
-    if (isViewportTransition(this.#resolvedOptions.transition)) {
+    if (isViewportTransition(this.#resolvedOptions.transition) || isSurfaceTransition(this.#resolvedOptions.transition)) {
       this.#performViewportTransition(targetPos, duration)
     } else if (this.#resolvedOptions.transition === 'fade' && (this.#resolvedOptions.slidesPerView ?? 1) <= 1) {
       this.#position = targetPos
@@ -739,9 +755,15 @@ export class Carousel {
       if (this.#render()) this.#onAnimationComplete()
       return
     }
-    const transition = new ViewportTransition(
-      viewport, this.#resolvedOptions.transition, targetPos < this.#position,
-    )
+    const definition = this.#resolvedOptions.transition
+    const transition = isSurfaceTransition(definition)
+      ? new SurfaceTransition(viewport, definition, {
+        fromElement: this.getSlideElement(this.#prevIndex), toElement: this.getSlideElement(this.#selectedIndex),
+        trackElement: this.#trackRenderer.getTrack(), fromIndex: this.#prevIndex, toIndex: this.#selectedIndex,
+        direction: targetPos < this.#position ? -1 : 1, orientation: this.#resolvedOptions.orientation,
+        viewportSize: this.#trackRenderer.viewportSize,
+      })
+      : new ViewportTransition(viewport, definition, targetPos < this.#position)
     const epoch = this.#navigationEpoch
     const current = () => !this.#destroyed && this.#navigationEpoch === epoch
     const active = () => current() && this.#viewportTransition === transition
@@ -767,18 +789,24 @@ export class Carousel {
     }
     if (!active()) return
     let committed = false
+    const commitAt = transition.commitAt ?? 0.5
+    if (commitAt === 0) {
+      this.#position = targetPos
+      if (!this.#render() || !active()) return
+      committed = true
+    }
     this.#runAnimation(duration, progress => {
       if (!active()) return
       try {
-        if (!committed && progress >= 0.5) {
-          this.#dispatchEvents(() => transition.render(0.5))
+        if (!committed && progress >= commitAt) {
+          this.#dispatchEvents(() => transition.render(commitAt))
           if (!active()) return
           this.#position = targetPos
           if (!this.#render() || !active()) return
           committed = true
           // Let position-sensitive plugins sample the committed destination
           // before revealing it, unless this is the final fallback frame.
-          if (progress < 1) return
+          if (progress < 1 || progress === commitAt) return
         }
         this.#dispatchEvents(() => transition.render(progress))
       } catch (error) {
@@ -806,7 +834,8 @@ export class Carousel {
     if (!slides[fromIdx] || !slides[toIdx]) { this.#animating = false; return }
     const transition = new FadeTransition(slides, this.#trackRenderer.getTrack(),
       this.#trackRenderer.slideSize, this.#trackRenderer.viewportSize,
-      this.#resolvedOptions.orientation, fromIdx, toIdx, this.#transitionDirection)
+      this.#resolvedOptions.orientation, fromIdx, toIdx, this.#transitionDirection, this.#geometry,
+      this.#trackRenderer.getPositionElements().filter(element => element.dataset.carouselCopy !== undefined))
     this.#fadeTransition = transition
     this.#runAnimation(duration, progress => {
       transition.render(progress)
@@ -864,9 +893,7 @@ export class Carousel {
       : Math.max(0, Math.min(index, this.#maxIndex()))
     const targetPos = this.#loop
       ? this.#position + this.#loop.shortestDelta(this.#position, targetIndex)
-      : Math.max(0, Math.min(targetIndex,
-          count - (this.#resolvedOptions.slidesPerView ?? 1),
-        )) * this.#step()
+      : this.#geometry.indexToPosition(targetIndex)
     this.#selectedIndex = targetIndex
     this.#prevIndex = this.#selectedIndex
     this.#runPositionAnimation(targetPos, duration, () => {
@@ -945,26 +972,15 @@ export class Carousel {
   /* ═══════════════ Public API ═══════════════ */
 
   #maxIndex() {
-    return getLastSlideIndex(this.#slideManager.getSlideCount(), this.#resolvedOptions.slidesPerView ?? 1)
-  }
-
-  #finiteIndex(step, position = this.#position) {
-    const maxIndex = this.#maxIndex()
-    const lastPosition = Math.min(maxIndex, Math.max(0,
-      this.#slideManager.getSlideCount() - (this.#resolvedOptions.slidesPerView ?? 1),
-    )) * step
-    // The last page can be a partial step. Rounding its coordinate alone
-    // would report the preceding slide and keep next()/autoplay enabled.
-    if (position >= lastPosition - Math.min(0.001, step * 1e-6)) return maxIndex
-    return Math.max(0, Math.min(maxIndex, Math.round(position / step)))
+    return this.#geometry?.lastIndex ?? 0
   }
 
   getIndex() {
-    const step = this.#pendingResizeStep ?? this.#step()
-    if (step <= 0) return this.#selectedIndex
-    if (this.#loop) return this.#loop.toIndex(this.#position)
-    return this.#finiteIndex(step)
+    if (!this.#geometry || this.#geometry.loopLength === 0) return this.#selectedIndex
+    return this.#geometry.positionToIndex(this.#position, !!this.#loop)
   }
+
+  getNavigationGeometry() { return this.#destroyed ? null : this.#geometry }
 
   getRealIndex() { return this.getIndex() }
   getSlide(index) { return this.#slideManager.getSlide(index ?? this.getIndex()) }
@@ -977,10 +993,50 @@ export class Carousel {
   updateSlide(index, patch) {
     if (this.#destroyed) return
     const selected = this.getIndex()
-    this.#slideManager.updateSlide(index, patch)
-    const refresh = Object.hasOwn(patch, 'content')
-      ? new Set([this.#slideManager.getKey(index)]) : false
-    this.#rebuildTrack(selected, refresh, { type: 'update', previousCount: this.getSlideCount() })
+    const mutation = this.#slideManager.updateSlide(index, patch)
+    const fields = ['content', 'lazy', 'meta', 'thumb'].filter(field => Object.hasOwn(patch, field))
+    const change = { type: 'update', previousCount: this.getSlideCount(), updated: [index], fields }
+    // A nested collection rebuild may have published new data before its DOM
+    // ordering. Reconcile keys there instead of addressing an obsolete wrapper.
+    if (this.#rebuilding || this.#trackRenderer.isMeasuringGeometry
+      || this.#resolvedOptions.geometry && mutation.metadataChanged) {
+      this.#rebuildTrack(selected, mutation.contentChanged
+        ? new Set([this.#slideManager.getKey(index)]) : false, change)
+      return
+    }
+    if (!mutation.contentChanged && !mutation.lazyChanged) {
+      if (!this.#trackRenderer.updateSlide(index, mutation.slide)) return
+      this.#dispatchEvents(() => this.#events.emit('slides:change', {
+        ...change, count: this.getSlideCount(), index: this.getIndex(),
+      }))
+      return
+    }
+    this.#updateRetainedSlide(index, mutation.slide, selected, mutation.contentChanged, change)
+  }
+
+  #updateRetainedSlide(index, slide, selected, refreshContent, change) {
+    const epoch = this.#stopAllAnimations()
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
+    this.#pendingResize = false
+    this.#pendingResizeStep = null
+    this.#dispatchEvents(() => {
+      this.#resetRender()
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
+      if (!this.#trackRenderer.updateSlide(index, slide, { refreshContent })) return
+      if (this.#destroyed || this.#navigationEpoch !== epoch) return
+      this.#initLoop()
+      this.#selectedIndex = selected
+      this.#position = this.#geometry.indexToPosition(selected, !!this.#loop)
+      if (!this.#render()) return
+      this.#selectedIndex = this.getIndex()
+      this.#rebuilding = false
+      // Existing plugins use this event to retire a gesture and discover newly
+      // pending lazy content. Unchanged wrappers and content owners are retained.
+      this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
+      if (!this.#destroyed && this.#navigationEpoch === epoch) {
+        this.#events.emit('slides:change', { ...change, count: this.getSlideCount(), index: this.getIndex() })
+      }
+    }, true)
   }
 
   /** Move an existing slide to a final array index without recreating its content. */
@@ -1008,8 +1064,14 @@ export class Carousel {
   refresh(index) {
     if (this.#destroyed) return
     if (index !== undefined) this.#slideManager.assertIndex(index)
+    const change = { type: 'refresh', previousCount: this.getSlideCount() }
+    if (index !== undefined && !this.#rebuilding && !this.#trackRenderer.isMeasuringGeometry) {
+      this.#updateRetainedSlide(index, this.#slideManager.getSlide(index), this.getIndex(), true,
+        { ...change, updated: [index], fields: ['content'] })
+      return
+    }
     this.#rebuildTrack(this.getIndex(), index === undefined ? true
-      : new Set([this.#slideManager.getKey(index)]), { type: 'refresh', previousCount: this.getSlideCount() })
+      : new Set([this.#slideManager.getKey(index)]), change)
   }
 
   addSlide(slide, index) {
@@ -1052,7 +1114,7 @@ export class Carousel {
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()
       const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
-      this.#position = Math.max(0, idx) * this.#step()
+      this.#position = this.#geometry.indexToPosition(Math.max(0, idx), !!this.#loop)
       this.#selectedIndex = Math.max(0, idx)
       if (!this.#render()) return
       this.#selectedIndex = this.getIndex()
@@ -1146,6 +1208,7 @@ export class Carousel {
     this.#trackRenderer.destroy()
     this.#slideManager.clear()
     this.#renderState = null
+    this.#geometry = null
     this.#container = null
     this.#options = {}
     this.#resolvedOptions = {}

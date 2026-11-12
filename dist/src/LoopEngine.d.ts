@@ -1,6 +1,10 @@
+import type { NavigationGeometry } from './NavigationGeometry.js'
+
 export class LoopEngine {
   constructor(count: number, step: number)
+  constructor(geometry: NavigationGeometry)
   update(count: number, step: number): void
+  update(geometry: NavigationGeometry): void
   get step(): number
   get loopLength(): number
   get count(): number

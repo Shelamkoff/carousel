@@ -1,6 +1,8 @@
-import { isHTMLElement, moveElement } from './dom.js'
+import { moveElement } from './dom.js'
+import { SlideContent } from './SlideContent.js'
 import { resolveLayoutSlots } from './layouts.js'
 import { writeSlideProgress } from './renderState.js'
+import { createNavigationGeometry } from './NavigationGeometry.js'
 
 /**
  * DOM construction and positioning.
@@ -45,11 +47,16 @@ export class TrackRenderer {
   #lastSlots = null
   #failedLayout = false
   #onLayoutError = null
+  #onGeometryError = null
+  #geometry = null
+  #failedGeometry = false
+  #measurementDepth = 0
   /** @type {((index: number, error: Error) => void) | null} */
   #onRenderError = null
   #document = null
   #view = null
   #revision = 0
+  #content = new SlideContent((index, error) => this.#reportRenderError(index, error))
 
   /**
    * @param {HTMLElement} container
@@ -89,8 +96,8 @@ export class TrackRenderer {
     this.#track = track
 
     this.#configureOrientation(layout)
-    this.#configureCopies(layout.slidesPerView)
     this.updateLayout(layout.slidesPerView, layout.gap)
+    this.#configureCopies(layout.visibleSlides ?? layout.slidesPerView)
     this.#setupResizeObserver()
     this.#setupSlideResizeObserver()
 
@@ -126,11 +133,17 @@ export class TrackRenderer {
     // Retire the complete old set without touching a nested rebuild's copies.
     for (const node of retired) node.remove()
     if (this.#revision !== revision) return
-    if (!this.#isLoop || !this.#track) return
+    if (!this.#isLoop || !this.#track || perView <= 0) return
     const count = this.#slideElements.length
     // Fractional views still need one extra wrap slot while dragging.
-    if (count === 0 || count > Math.ceil(perView)) return
-    const cycles = Math.ceil(perView / count)
+    if (count === 0) return
+    let cycles = count <= Math.ceil(perView) ? Math.ceil(perView / count) : 0
+    if (this.#geometry && !this.#geometry.uniform && this.#geometry.loopLength > 0) {
+      const largest = this.#geometry.slides.reduce((size, slide) => Math.max(size, slide.size), 0)
+      if (this.#geometry.loopLength <= this.viewportSize + largest) {
+        cycles = Math.max(cycles, Math.ceil(this.viewportSize / this.#geometry.loopLength))
+      }
+    }
     for (let cycle = 1; cycle <= cycles; cycle++) {
       for (let i = 0; i < count; i++) {
         const copy = /** @type {HTMLElement} */ (this.#slideElements[i].cloneNode(true))
@@ -182,7 +195,13 @@ export class TrackRenderer {
       if (this.#revision !== revision) return
       copy.replaceChildren(...content.childNodes)
       if (this.#revision !== revision) return
-      copy.dataset.rendered = original.dataset.rendered
+      for (const name of ['rendered', 'loaded']) {
+        if (original.dataset[name] === undefined) delete copy.dataset[name]
+        else copy.dataset[name] = original.dataset[name]
+      }
+      for (const name of ['carousel__slide--error', 'carousel__slide--loaded']) {
+        copy.classList.toggle(name, original.classList.contains(name))
+      }
     }
   }
 
@@ -227,7 +246,7 @@ export class TrackRenderer {
         this.#lastViewportSize = size
         this.#lastViewportCrossSize = crossSize
         const previousSlideSize = this.#slideSize
-        this.#recalcSlideSize()
+        if (!this.#recalcSlideSize()) return
         this.#onResize?.(previousSlideSize)
       } else {
         this.#updateTrackHeight()
@@ -249,35 +268,20 @@ export class TrackRenderer {
   /** @param {(index: number, error: Error) => void} cb */
   onRenderError(cb) { this.#onRenderError = cb }
   onLayoutError(cb) { this.#onLayoutError = cb }
+  onGeometryError(cb) { this.#onGeometryError = cb }
+  getNavigationGeometry() { return this.#geometry }
+  get isMeasuringGeometry() { return this.#measurementDepth > 0 }
   get revision() { return this.#revision }
+
+  #reportRenderError(index, error, handler = this.#onRenderError) {
+    if (handler) handler(index, error)
+    else console.error(`Carousel: failed to render slide ${index}`, error)
+  }
 
   /** @param {HTMLElement} el @param {import('./types').SlideData} slide @param {number} index */
   #renderContent(el, slide, index) {
     const revision = this.#revision
-    el.classList.remove('carousel__slide--error')
-    delete el.dataset.rendered
-    el.replaceChildren()
-    if (this.#revision !== revision) return
-    try {
-      if (typeof slide.content === 'string') el.innerHTML = slide.content
-      else if (isHTMLElement(slide.content)) el.appendChild(slide.content.cloneNode(true))
-      else if (typeof slide.content === 'function') {
-        const content = slide.content()
-        if (this.#revision !== revision) return
-        if (!isHTMLElement(content)) throw new TypeError('Slide render function must return an HTMLElement')
-        el.appendChild(content)
-      }
-      if (this.#revision !== revision) return
-      el.dataset.rendered = 'true'
-    } catch (error) {
-      if (this.#revision !== revision) return
-      el.replaceChildren()
-      const normalized = error instanceof Error ? error : new Error(String(error))
-      el.dataset.rendered = 'error'
-      el.classList.add('carousel__slide--error')
-      if (this.#onRenderError) this.#onRenderError(index, normalized)
-      else console.error(`Carousel: failed to render slide ${index}`, normalized)
-    }
+    return this.#content.render(el, slide.content, index, () => this.#revision === revision)
   }
 
   /** @param {number} trackIndex @param {import('./types').SlideData} slide */
@@ -294,16 +298,47 @@ export class TrackRenderer {
     return true
   }
 
+  /** Update one retained identity; metadata changes never touch its DOM or layout. */
+  updateSlide(index, slide, { refreshContent = false } = {}) {
+    const element = this.#slideElements[index]
+    if (!element || !this.#track) return false
+    const previous = this.#sourceSlides[index]
+    const contentChanged = refreshContent || this.#sourceContent[index] !== slide.content
+    const materialize = !!previous.lazy !== !!slide.lazy && !slide.lazy && element.dataset.rendered !== 'true'
+    // Publish bookkeeping before entering cleanup/factories, so a nested update
+    // can replace it without an obsolete assignment after the callback returns.
+    this.#sourceSlides[index] = slide
+    this.#sourceContent[index] = slide.content
+    if (!contentChanged && !materialize) return true
+
+    const revision = ++this.#revision
+    const current = () => this.#revision === revision
+    this.#lastSlots = null
+    if (slide.lazy) this.#content.clear(element, index, current)
+    else this.#renderContent(element, slide, index)
+    if (!current()) return false
+    this.#syncCopies(index)
+    if (!current()) return false
+    this.refreshLayout()
+    return current()
+  }
+
   /** Keep orientation and viewport sizing together during atomic rebuilds. */
   #configureOrientation(layout) {
+    // An error listener may replace content during measurement. Its nested
+    // reconciliation inherits this failure instead of recursively retrying it.
+    const retainGeometryFailure = this.#measurementDepth > 0
+      && this.#layoutOptions.geometry === layout.geometry && this.#failedGeometry
     this.#vertical = layout.orientation === 'vertical'
-    this.#expanding = (layout.layout ?? 'standard') !== 'standard'
+    this.#expanding = (layout.layout ?? 'standard') !== 'standard' || layout.geometry !== undefined
     this.#layoutOptions = { ...layout, layout: layout.layout ?? 'standard' }
     this.#failedLayout = false
+    this.#failedGeometry = retainGeometryFailure
     this.#lastSlots = null
     this.#root?.classList.toggle('carousel--vertical', this.#vertical)
     this.#root?.classList.toggle('carousel--expand', layout.layout === 'expand')
     this.#root?.classList.toggle('carousel--custom-layout', typeof layout.layout === 'object')
+    this.#root?.classList.toggle('carousel--geometry', layout.geometry !== undefined)
     if (this.#viewport) {
       this.#viewport.style.height = this.#vertical && layout.viewportHeight !== undefined
         ? layout.viewportHeight + 'px' : ''
@@ -328,19 +363,51 @@ export class TrackRenderer {
   }
 
   #recalcSlideSize() {
-    if (!this.#viewport) return
+    if (!this.#viewport) return false
+    const revision = this.#revision
     const size = this.#measureViewportSize()
     this.#lastViewportSize = size
     this.#lastViewportCrossSize = this.#vertical ? this.#viewport.offsetWidth : 0
     const totalGap = this.#gap * (this.#slidesPerView - 1)
     this.#slideSize = Math.max(0, (size - totalGap) / this.#slidesPerView)
 
+    const context = {
+      viewportSize: size, count: this.#sourceSlides.length,
+      slidesPerView: this.#layoutOptions.logicalSlidesPerView ?? this.#slidesPerView,
+      gap: this.#gap, orientation: this.#vertical ? 'vertical' : 'horizontal',
+      slides: this.#sourceSlides.map((_, index) => ({ index })),
+    }
+    const uniform = { slideSize: this.#slideSize, step: this.#slideSize + this.#gap }
+    let measured
+    this.#measurementDepth++
+    try {
+      const definition = this.#failedGeometry ? undefined : this.#layoutOptions.geometry
+      const input = definition ? { ...context,
+        slides: this.#sourceSlides.map((slide, index) => ({ index, id: slide.id, meta: slide.meta })),
+      } : context
+      measured = createNavigationGeometry(input, definition, uniform)
+    } catch (error) {
+      if (this.#revision !== revision) return false
+      this.#failedGeometry = true
+      measured = createNavigationGeometry(context, undefined, uniform)
+      const normalized = error instanceof Error ? error : new Error(String(error))
+      const name = this.#layoutOptions.geometry?.name ?? 'geometry'
+      if (this.#onGeometryError) this.#onGeometryError(name, normalized)
+      else console.error(`Carousel: geometry "${name}" failed`, normalized)
+    } finally {
+      this.#measurementDepth--
+    }
+    if (this.#revision !== revision) return false
+    this.#geometry = measured
+    this.#lastSlots = null
+
     for (const el of this.getPositionElements()) {
-      el.style.width = this.#vertical ? '100%' : this.#slideSize + 'px'
-      el.style.minWidth = this.#vertical ? '0' : this.#slideSize + 'px'
-      el.style.height = this.#vertical ? this.#slideSize + 'px' : ''
-      el.style.minHeight = this.#vertical ? this.#slideSize + 'px' : ''
-      el.style.flexBasis = this.#slideSize + 'px'
+      const slideSize = measured.slides[Number(el.dataset.index)]?.size ?? this.#slideSize
+      el.style.width = this.#vertical ? '100%' : slideSize + 'px'
+      el.style.minWidth = this.#vertical ? '0' : slideSize + 'px'
+      el.style.height = this.#vertical ? slideSize + 'px' : ''
+      el.style.minHeight = this.#vertical ? slideSize + 'px' : ''
+      el.style.flexBasis = slideSize + 'px'
       el.style.flexShrink = '0'
       el.style.flexGrow = '0'
 
@@ -362,6 +429,7 @@ export class TrackRenderer {
     }
 
     this.#updateTrackHeight()
+    return this.#revision === revision
   }
 
   #updateTrackHeight() {
@@ -384,6 +452,15 @@ export class TrackRenderer {
   /** Recalculate dimensions after a plugin renders or changes slide content. */
   refreshLayout() {
     if (this.#isLoop || this.#vertical || this.#expanding) this.#updateTrackHeight()
+  }
+
+  /** Rebuild visual coverage after a measured resize, retaining live content. */
+  refreshCopies() {
+    if (!this.#track) return false
+    const revision = ++this.#revision
+    this.#lastSlots = null
+    this.#configureCopies(this.#layoutOptions.visibleSlides ?? this.#slidesPerView)
+    return this.#revision === revision
   }
 
   /** @returns {number} */
@@ -409,14 +486,13 @@ export class TrackRenderer {
 
   /** Numeric geometry is calculated once and shared with effects, never read back from CSS. */
   #baseSlots(position, engine) {
-    const step = this.#slideSize + this.#gap
-    const slots = engine
-      ? engine.getSlots(this.getPositionElements(), position, this.#lastViewportSize, this.#slideSize)
-      : this.#slideElements.map((slide, logical) => ({ slide, logical, copy: 0, x: logical * step - position }))
-    return slots.map(({ slide, logical, copy, x }) => ({
-      element: slide, index: logical, copy, isCopy: copy !== 0,
-      offset: x, size: this.#slideSize, progress: step > 0 ? x / step : 0,
-    }))
+    const elements = this.getPositionElements()
+    const geometry = this.#geometry
+    if (!geometry) return []
+    return geometry.getSlots(elements.map(element => ({
+      index: Number(element.dataset.index), copy: Number(element.dataset.carouselCopy ?? 0),
+    })), position, !!engine, this.#lastViewportSize)
+      .map((slot, index) => ({ ...slot, element: elements[index] }))
   }
 
   getRenderSlots(position, engine) { return this.#lastSlots ?? this.#baseSlots(position, engine) }
@@ -428,7 +504,7 @@ export class TrackRenderer {
     const layout = options.layout
     // Preserve the O(1) track-transform path for an ordinary finite carousel.
     // Its per-slide snapshot is allocated only when a render consumer asks for it.
-    if (!engine && layout === 'standard') {
+    if (!engine && layout === 'standard' && !options.geometry) {
       this.#lastSlots = null
       this.setPosition(-position)
       return true
@@ -439,6 +515,7 @@ export class TrackRenderer {
       try {
         const geometry = resolveLayoutSlots(layout, {
           position, step: this.#slideSize + this.#gap, viewportSize: this.#lastViewportSize,
+          logicalPosition: this.#geometry?.logicalPosition(position, !!engine) ?? 0,
           gap: this.#gap, count: this.#slideElements.length, loop: !!engine,
           orientation: this.#vertical ? 'vertical' : 'horizontal',
           slides: base.map(({ element, ...slot }) => slot),
@@ -494,25 +571,22 @@ export class TrackRenderer {
     const pool = new Map()
     for (let i = 0; i < this.#sourceSlides.length; i++) {
       const key = this.#sourceKeys[i]
-      if (!pool.has(key)) pool.set(key, [])
-      pool.get(key).push({ element: this.#slideElements[i], content: this.#sourceContent[i] })
+      if (!pool.has(key)) pool.set(key, { entries: [], cursor: 0 })
+      pool.get(key).entries.push({ element: this.#slideElements[i], content: this.#sourceContent[i] })
     }
 
     const next = []
     for (let index = 0; index < slides.length; index++) {
       const slide = slides[index]
       const key = layout.keys?.[index] ?? slide
-      const previous = pool.get(key)?.shift()
+      const matches = pool.get(key)
+      const previous = matches?.entries[matches.cursor++]
       const el = previous ? previous.element : this.#createSlide(slide, index, slides.length)
       if (this.#revision !== revision) return
       if (previous && (refreshContent === true || refreshContent instanceof Set && refreshContent.has(key)
         || previous.content !== slide.content || !slide.lazy && el.dataset.rendered !== 'true')) {
-        el.replaceChildren()
-        if (this.#revision !== revision) return
-        delete el.dataset.rendered
-        delete el.dataset.loaded
-        el.classList.remove('carousel__slide--error', 'carousel__slide--loaded')
-        if (!slide.lazy) this.#renderContent(el, slide, index)
+        if (slide.lazy) this.#content.clear(el, index, () => this.#revision === revision)
+        else this.#renderContent(el, slide, index)
         if (this.#revision !== revision) return
       }
       el.dataset.index = String(index)
@@ -522,6 +596,7 @@ export class TrackRenderer {
 
     // A stable ordering requires no DOM moves at all.
     const kept = new Set(next)
+    if (!this.#content.releaseUnused(kept, () => this.#revision === revision)) return
     for (let i = 0; i < next.length; i++) {
       if (this.#track.children[i] !== next[i]) {
         moveElement(this.#track, next[i], this.#track.children[i] ?? null)
@@ -541,11 +616,12 @@ export class TrackRenderer {
     this.#sourceKeys = layout.keys ?? [...slides]
     this.#sourceSlides = [...slides]
     this.#sourceContent = slides.map(slide => slide.content)
-    this.#configureCopies(layout.slidesPerView)
-    if (this.#revision !== revision) return
     if (this.#isLoop) this.#track.style.transform = 'none'
     else this.#track.style.height = ''
     this.updateLayout(layout.slidesPerView, layout.gap)
+    if (this.#revision !== revision) return
+    this.#configureCopies(layout.visibleSlides ?? layout.slidesPerView)
+    if (this.#revision !== revision) return
     this.#setupSlideResizeObserver()
   }
 
@@ -563,6 +639,9 @@ export class TrackRenderer {
 
   destroy() {
     this.#revision++
+    const root = this.#root
+    const copies = this.#copies
+    const report = this.#onRenderError
     this.#cancelObservedLayout()
     this.stopAnimation()
     this.#resizeObserver?.disconnect()
@@ -572,10 +651,10 @@ export class TrackRenderer {
     this.#onResize = null
     this.#onRenderError = null
     this.#onLayoutError = null
+    this.#onGeometryError = null
+    this.#geometry = null
     this.#lastSlots = null
-    for (const copy of this.#copies) copy.remove()
     this.#copies = []
-    this.#root?.remove()
     this.#root = null
     this.#viewport = null
     this.#track = null
@@ -585,5 +664,8 @@ export class TrackRenderer {
     this.#sourceKeys = []
     this.#document = null
     this.#view = null
+    this.#content.destroy((index, error) => this.#reportRenderError(index, error, report))
+    for (const copy of copies) copy.remove()
+    root?.remove()
   }
 }

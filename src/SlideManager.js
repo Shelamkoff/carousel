@@ -25,10 +25,13 @@ export class SlideManager {
     for (let i = 0; i < this.#slides.length; i++) {
       const data = this.#slides[i]
       const identity = data.id ?? data
-      if (!pool.has(identity)) pool.set(identity, [])
-      pool.get(identity).push(this.#keys[i])
+      if (!pool.has(identity)) pool.set(identity, { keys: [], cursor: 0 })
+      pool.get(identity).keys.push(this.#keys[i])
     }
-    const keys = slides.map(data => pool.get(data.id ?? data)?.shift() ?? {})
+    const keys = slides.map(data => {
+      const matches = pool.get(data.id ?? data)
+      return matches && matches.cursor < matches.keys.length ? matches.keys[matches.cursor++] : {}
+    })
     this.#slides = [...slides]
     this.#keys = keys
   }
@@ -45,6 +48,13 @@ export class SlideManager {
     const next = { ...previous, ...patch }
     validateSlide(next)
     this.#slides[index] = next
+    return {
+      previous, slide: next,
+      contentChanged: Object.hasOwn(patch, 'content'),
+      lazyChanged: !!previous.lazy !== !!next.lazy,
+      metadataChanged: previous.meta !== next.meta,
+      thumbChanged: previous.thumb !== next.thumb,
+    }
   }
 
   moveSlide(from, to) {

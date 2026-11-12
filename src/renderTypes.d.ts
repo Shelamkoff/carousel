@@ -11,6 +11,8 @@ export interface CarouselLayoutSlot {
 
 export interface CarouselLayoutContext {
   readonly position: number
+  /** Continuous logical position interpolated between physical snap points. */
+  readonly logicalPosition: number
   readonly step: number
   readonly viewportSize: number
   readonly gap: number
@@ -29,6 +31,8 @@ export interface CarouselSlideGeometry {
 
 export interface CarouselLayoutDefinition {
   readonly name: string
+  /** Minimum visual coverage for short loops, independent of logical page size. */
+  readonly visibleSlides?: number
   /** Synchronous, ordered geometry for every visual slot, including inert copies. */
   render(context: CarouselLayoutContext): readonly CarouselSlideGeometry[]
 }

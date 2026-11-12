@@ -2367,3 +2367,258 @@ for (const transition of ['fade', 'stairs']) {
     } finally { carousel.destroy() }
   })
 }
+
+test('physical geometry drives finite targets, render slots and clipped last-page identity', () => {
+  let measurements = 0
+  const geometry = { name: 'variable', measure(context) {
+    measurements++
+    assert.ok(Object.isFrozen(context) && Object.isFrozen(context.slides))
+    assert.equal(context.viewportSize, 300)
+    return { slides: [{ offset: 0, size: 100 }, { offset: 120, size: 300 },
+      { offset: 440, size: 160 }, { offset: 620, size: 180 }] }
+  } }
+  const { carousel, track } = mount(300, 4, { geometry, gap: 20, transitionDuration: 0 })
+  try {
+    const model = carousel.getNavigationGeometry()
+    assert.ok(Object.isFrozen(model))
+    assert.deepEqual(model.snapPoints, [0, 120, 440, 620])
+    assert.equal(model.maxPosition, 500)
+    assert.equal(model.lastIndex, 3)
+    assert.deepEqual(track.children.map(slide => slide.style.width), ['100px', '300px', '160px', '180px'])
+    carousel.next()
+    assert.equal(carousel.getRenderState().position, 120)
+    carousel.goTo(99)
+    assert.equal(carousel.getIndex(), 3)
+    assert.equal(carousel.getRenderState().position, 500)
+    assert.deepEqual(carousel.getRenderState().slides.map(slide => slide.offset), [-500, -380, -60, 120])
+    carousel.next()
+    assert.equal(carousel.getIndex(), 3)
+    carousel.prev()
+    assert.equal(carousel.getRenderState().position, 440)
+    assert.equal(measurements, 1, 'navigation must not remeasure application geometry')
+  } finally { carousel.destroy() }
+  assert.equal(carousel.getNavigationGeometry(), null)
+})
+
+test('independent snap points interpolate layout progress and declared visual coverage', () => {
+  let context
+  const geometry = { name: 'separate-snaps', measure() {
+    return { slides: [{ offset: 0, size: 60 }, { offset: 100, size: 80 }],
+      snapPoints: [0, 140], loopLength: 220 }
+  } }
+  const probe = { name: 'geometry-probe', install(ctx) { this.ctx = ctx } }
+  const { carousel, track } = mount(300, 2, { geometry, loop: true, slidesPerView: 1,
+    layout: { name: 'coverage', visibleSlides: 5, render(input) { context = input; return input.slides } },
+    plugins: [probe], transitionDuration: 0,
+  })
+  try {
+    assert.equal(track.children.length, 8)
+    probe.ctx.setPositionDrag(70)
+    assert.equal(context.logicalPosition, .5)
+    assert.equal(carousel.getIndex(), 1, 'nearest snap ties advance')
+    assert.ok(carousel.getRenderState().slides.every(slide => Number.isFinite(slide.progress)))
+    carousel.goTo(1)
+    assert.equal(carousel.getRenderState().position, 140)
+    carousel.prev()
+    assert.equal(carousel.getRenderState().position, 0)
+  } finally { carousel.destroy() }
+})
+
+test('geometry errors fall back once until reconfiguration and allow a later repair', () => {
+  const { carousel, host } = mount(300, 3, { transitionDuration: 0 })
+  let failures = 0
+  const errors = []
+  carousel.on('geometry:error', event => errors.push(event))
+  try {
+    carousel.update({ geometry: { name: 'broken', measure() { failures++; throw 'Bad measurement' } } })
+    assert.equal(errors.length, 1)
+    assert.equal(errors[0].name, 'broken')
+    assert.equal(errors[0].error.message, 'Bad measurement')
+    assert.equal(carousel.getNavigationGeometry().uniform, true)
+    carousel.next()
+    host.width = 400
+    ResizeObserver.flush(); frame(16)
+    assert.equal(failures, 1, 'responsive refresh must not call a retired failing measurement')
+    assert.equal(carousel.getIndex(), 1)
+    carousel.update({ geometry: { name: 'repaired', measure({ count }) {
+      return { slides: Array.from({ length: count }, (_, i) => ({ offset: i * 100, size: 90 })), maxPosition: 200 }
+    } } })
+    assert.equal(carousel.getNavigationGeometry().uniform, false)
+    carousel.next()
+    assert.equal(carousel.getRenderState().position, 200)
+  } finally { carousel.destroy() }
+})
+
+test('geometry callbacks can replace a collection without publishing obsolete measurements', () => {
+  const { carousel } = mount(300, 3, { transitionDuration: 0 })
+  let reenter = true
+  const geometry = { name: 'reentrant', measure({ count }) {
+    if (reenter) {
+      reenter = false
+      carousel.setSlides([{ content: 'Current A' }, { content: 'Current B' }])
+    }
+    return { slides: Array.from({ length: count }, (_, i) => ({ offset: i * 100, size: 100 })),
+      maxPosition: Math.max(0, count - 1) * 100 }
+  } }
+  try {
+    carousel.update({ geometry })
+    assert.equal(carousel.getNavigationGeometry().count, 2)
+    assert.equal(carousel.getSlideCount(), 2)
+    carousel.goTo(1)
+    assert.equal(carousel.getRenderState().position, 100)
+    assert.equal(carousel.getRenderState().slides.length, 2)
+  } finally { carousel.destroy() }
+})
+
+test('uniform measurements leave metadata untouched and a failing metadata snapshot can fall back safely', () => {
+  let reads = 0
+  const meta = { get width() { reads++; throw new Error('Metadata unavailable') } }
+  const { carousel } = mount(200, 2, { transitionDuration: 0 })
+  const errors = []
+  carousel.on('geometry:error', event => errors.push(event.error.message))
+  try {
+    carousel.setSlides([{ content: 'First', meta }, { content: 'Second' }])
+    carousel.update({ gap: 10 })
+    assert.equal(reads, 0)
+    carousel.update({ geometry: { name: 'metadata-sizes', measure({ slides }) {
+      return { slides: slides.map((slide, index) => ({ offset: index * 200, size: slide.meta?.width ?? 200 })) }
+    } } })
+    assert.equal(reads, 1)
+    assert.deepEqual(errors, ['Metadata unavailable'])
+    assert.equal(carousel.getNavigationGeometry().uniform, true)
+    carousel.next()
+    assert.equal(carousel.getIndex(), 1)
+  } finally { carousel.destroy() }
+})
+
+test('error-handler content updates do not retry a failed geometry recursively during the same measurement', () => {
+  const geometry = { name: 'persistent-error', measure({ viewportSize, count }) {
+    if (viewportSize > 200) throw new Error('Still unavailable')
+    return { slides: Array.from({ length: count }, (_, i) => ({ offset: i * 100, size: 100 })) }
+  } }
+  const { carousel, host } = mount(200, 3, { geometry, transitionDuration: 0 })
+  let errors = 0
+  carousel.on('geometry:error', () => {
+    errors++
+    if (errors === 1) carousel.updateSlide(0, { content: 'Geometry fallback' })
+  })
+  try {
+    host.width = 400
+    ResizeObserver.flush(); frame(16)
+    assert.equal(errors, 1)
+    assert.equal(carousel.getNavigationGeometry().uniform, true)
+    assert.equal(carousel.getNavigationGeometry().viewportSize, 400)
+    assert.equal(carousel.getRenderState().viewportSize, 400)
+    assert.equal(carousel.getSlide(0).content, 'Geometry fallback')
+    carousel.update({ geometry })
+    assert.equal(errors, 2, 'an explicit later reconfiguration may retry the failed definition')
+  } finally { carousel.destroy() }
+})
+
+for (const loop of [false, true]) {
+  test(`physical resize settles the pending ${loop ? 'loop' : 'finite'} destination without recreating content`, () => {
+    let measurements = 0
+    const geometry = { name: 'responsive-physical', measure({ viewportSize, count }) {
+      measurements++
+      return { slides: Array.from({ length: count }, (_, i) => ({ offset: i * viewportSize / 2, size: viewportSize / 2 })),
+        maxPosition: (count - 1) * viewportSize / 2 }
+    } }
+    const { carousel, host } = mount(200, 4, { loop, geometry, transitionDuration: 100 })
+    const elements = carousel.getSlideElements()
+    const events = []
+    carousel.on('slide:change', ({ index }) => events.push(index))
+    try {
+      carousel.goTo(2)
+      frame(20)
+      host.width = 400
+      ResizeObserver.flush(); frame(16)
+      assert.equal(carousel.getIndex(), 2)
+      assert.equal(carousel.getRenderState().position, 400)
+      assert.equal(carousel.getRenderState().phase, 'idle')
+      assert.deepEqual(carousel.getSlideElements(), elements)
+      assert.deepEqual(events, [2])
+      assert.equal(measurements, 2, 'one physical measurement per observed size')
+      frame(200)
+      assert.deepEqual(events, [2], 'the old clock cannot complete again')
+    } finally { carousel.destroy() }
+  })
+}
+
+test('metadata and thumbnail updates preserve the active clock, revision and live content', () => {
+  const { carousel } = mount(200, 4, { transitionDuration: 100 })
+  const elements = carousel.getSlideElements()
+  let resets = 0, resizes = 0
+  const changes = [], updates = []
+  carousel.on('render:reset', () => resets++)
+  carousel.on('resize', () => resizes++)
+  carousel.on('slide:change', event => changes.push(event.index))
+  carousel.on('slides:change', event => updates.push(event))
+  try {
+    carousel.goTo(2)
+    frame(20)
+    const before = carousel.getRenderState()
+    carousel.updateSlide(1, { meta: { rating: 5 }, thumb: 'new-thumbnail.jpg' })
+    const after = carousel.getRenderState()
+    assert.equal(after.phase, 'animation')
+    assert.equal(after.position, before.position)
+    assert.equal(after.revision, before.revision)
+    assert.equal(resets, 0)
+    assert.equal(resizes, 0)
+    assert.deepEqual(carousel.getSlideElements(), elements)
+    assert.deepEqual(updates[0].updated, [1])
+    assert.deepEqual(updates[0].fields, ['meta', 'thumb'])
+    frame(100)
+    assert.deepEqual(changes, [2])
+  } finally { carousel.destroy() }
+})
+
+test('point content refresh retains measured geometry and cleans up only the replaced owner', () => {
+  let measurements = 0
+  const probe = { name: 'point-update', install(ctx) { this.ctx = ctx } }
+  const { carousel } = mount(300, 3, { transitionDuration: 0, plugins: [probe],
+    geometry: { name: 'fixed', measure({ count }) {
+      measurements++
+      return { slides: Array.from({ length: count }, (_, i) => ({ offset: i * 100, size: 100 })), maxPosition: 200 }
+    } },
+  })
+  const calls = []
+  const owner = id => () => ({ element: new Element('input'), destroy() { calls.push(id) } })
+  try {
+    carousel.setSlides([0, 1, 2].map(id => ({ id, content: owner(id) })))
+    const elements = carousel.getSlideElements()
+    const neighboring = [elements[0].firstChild, elements[2].firstChild]
+    const model = carousel.getNavigationGeometry()
+    const measured = measurements
+    carousel.goTo(1)
+    carousel.refresh(1)
+    assert.deepEqual(calls, [1])
+    assert.equal(carousel.getNavigationGeometry(), model)
+    assert.equal(measurements, measured)
+    assert.equal(elements[0].firstChild, neighboring[0])
+    assert.equal(elements[2].firstChild, neighboring[1])
+    assert.equal(carousel.getIndex(), 1)
+  } finally { carousel.destroy() }
+  assert.equal(calls[0], 1)
+  assert.deepEqual(calls.slice(1).sort(), [0, 1, 2])
+})
+
+test('fade retains physical slide sizes and hides short-loop replicas until cleanup', () => {
+  const { carousel, track } = mount(300, 2, { loop: true, transition: 'fade', transitionDuration: 100,
+    geometry: { name: 'fade-sizes', measure() {
+      return { slides: [{ offset: 0, size: 120 }, { offset: 130, size: 160 }], loopLength: 300 }
+    } },
+  })
+  try {
+    carousel.next()
+    frame(20)
+    assert.deepEqual(carousel.getRenderState().slides.map(slide => slide.size), [120, 160])
+    assert.equal(carousel.getSlideElement(0).style.width, '120px')
+    assert.equal(carousel.getSlideElement(1).style.width, '160px')
+    const copies = track.children.filter(element => element.dataset.carouselCopy !== undefined)
+    assert.ok(copies.length > 0)
+    assert.ok(copies.every(element => element.style.visibility === 'hidden'))
+    frame(100)
+    assert.ok(copies.every(element => element.style.visibility === ''))
+    assert.equal(carousel.getIndex(), 1)
+  } finally { carousel.destroy() }
+})

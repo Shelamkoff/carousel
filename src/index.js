@@ -16,3 +16,6 @@ export { createParallax } from './plugins/parallax.js'
 // Slide effects share the carousel's render clock.
 export { createSlideEffect } from './effects/createSlideEffect.js'
 export { createFocusEffect } from './effects/focus.js'
+
+// Surface transitions share the same clock and lifecycle as built-in effects.
+export { createSurfaceCrossfade, createSurfacePageTurn } from './transitions/surfaces.js'

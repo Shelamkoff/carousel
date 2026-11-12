@@ -1,5 +1,14 @@
 import type { SlideData, SlidePatch } from './types.js'
 
+export interface SlideUpdateResult {
+  previous: SlideData
+  slide: SlideData
+  contentChanged: boolean
+  lazyChanged: boolean
+  metadataChanged: boolean
+  thumbChanged: boolean
+}
+
 export class SlideManager {
   constructor(slides: readonly SlideData[])
   getSlides(): SlideData[]
@@ -12,7 +21,7 @@ export class SlideManager {
   indexOfKey(key: object | undefined): number
   assertIndex(index: number): void
   setSlides(slides: readonly SlideData[]): void
-  updateSlide(index: number, patch: SlidePatch): void
+  updateSlide(index: number, patch: SlidePatch): SlideUpdateResult
   moveSlide(from: number, to: number): boolean
   clear(): void
 }

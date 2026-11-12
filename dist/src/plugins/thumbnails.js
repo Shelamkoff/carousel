@@ -13,6 +13,8 @@ export function createThumbnails(options = {}) {
   let container = null
   /** @type {HTMLElement[]} */
   let thumbEls = []
+  let thumbImages = []
+  let thumbSources = []
 
   const width = options.width ?? 60
   const height = options.height ?? 40
@@ -24,12 +26,45 @@ export function createThumbnails(options = {}) {
     throw new TypeError('Carousel thumbnail position must be bottom, left, or right')
   }
 
+  function updateThumb(index, slide) {
+    const thumb = thumbEls[index]
+    if (!thumb) return
+    const src = slide?.thumb || undefined
+    if (thumbSources[index] === src) return
+    thumbSources[index] = src
+    if (!src) {
+      thumbImages[index]?.remove()
+      thumbImages[index] = null
+      return
+    }
+    let image = thumbImages[index]
+    if (!image) {
+      const document = thumb.ownerDocument ?? globalThis.document
+      image = document.createElement('img')
+      image.alt = ''
+      image.draggable = false
+      thumbImages[index] = image
+      thumb.appendChild(image)
+    }
+    image.src = src
+  }
+
+  function updateSlides(change) {
+    if (!ctx || change?.type !== 'update' || !change.fields?.includes('thumb')) return
+    const slides = typeof ctx.getSlide === 'function' ? null : ctx.getSlides()
+    for (const index of change.updated ?? []) {
+      updateThumb(index, slides ? slides[index] : ctx.getSlide(index))
+    }
+  }
+
   function buildThumbs() {
     if (!container || !ctx) return
     const owner = ctx
     const document = container.ownerDocument ?? globalThis.document
     container.innerHTML = ''
     thumbEls = []
+    thumbImages = []
+    thumbSources = []
 
     const slides = ctx.getSlides()
     for (let i = 0; i < slides.length; i++) {
@@ -40,19 +75,11 @@ export function createThumbnails(options = {}) {
       thumb.style.height = `var(--carousel-thumb-height, ${height}px)`
       thumb.setAttribute('aria-label', `Go to slide ${i + 1}`)
 
-      const src = slides[i].thumb
-      if (src) {
-        const img = document.createElement('img')
-        img.src = src
-        img.alt = ''
-        img.draggable = false
-        thumb.appendChild(img)
-      }
-
       thumb.addEventListener('click', () => {
         if (ctx === owner && thumbEls[i] === thumb) owner.goTo(i)
       })
       thumbEls.push(thumb)
+      updateThumb(i, slides[i])
       container.appendChild(thumb)
     }
 
@@ -90,6 +117,7 @@ export function createThumbnails(options = {}) {
       unsubs.push(
         context.on('slide:change', updateActive),
         context.on('resize', buildThumbs),
+        context.on('slides:change', updateSlides),
       )
     },
 
@@ -101,6 +129,8 @@ export function createThumbnails(options = {}) {
       root?.classList.remove('carousel--thumbs-left', 'carousel--thumbs-right')
       container = null
       thumbEls = []
+      thumbImages = []
+      thumbSources = []
       ctx = null
     },
   }

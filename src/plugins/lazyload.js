@@ -1,3 +1,41 @@
+/** Collect visible physical slides and their logical neighbors in linear time. */
+function physicalPreloads(geometry, index, loop, radius) {
+  const count = geometry.count
+  const position = geometry.indexToPosition(index, loop)
+  const visible = new Set([index])
+  for (let target = 0; target < count; target++) {
+    const { offset, size } = geometry.slides[target]
+    if (size === 0 || geometry.viewportSize === 0) continue
+    let start = offset - position
+    if (loop && geometry.loopLength > 0) {
+      start = geometry.normalize(start)
+      // Either the upcoming instance or its preceding copy can intersect the
+      // viewport. A single recycled original does not describe both instances.
+      if (start < geometry.viewportSize || start - geometry.loopLength + size > 0) visible.add(target)
+    } else if (start < geometry.viewportSize && start + size > 0) visible.add(target)
+  }
+  if (radius >= count - 1 || loop && radius * 2 + 1 >= count) {
+    return Array.from({ length: count }, (_, index) => index)
+  }
+  // Merge overlapping neighbor ranges without revisiting the same large radius
+  // for every visible card. Wrapped ranges are split at the collection boundary.
+  const coverage = Array(count + 1).fill(0)
+  const include = (first, last) => { coverage[first]++; coverage[last + 1]-- }
+  for (const target of visible) {
+    const first = target - radius, last = target + radius
+    include(Math.max(0, first), Math.min(count - 1, last))
+    if (loop && first < 0) include(count + first, count - 1)
+    if (loop && last >= count) include(0, last - count)
+  }
+  const targets = []
+  let depth = 0
+  for (let target = 0; target < count; target++) {
+    depth += coverage[target]
+    if (depth > 0) targets.push(target)
+  }
+  return targets
+}
+
 /**
  * Lazy load plugin — defers rendering + preloads adjacent slides.
  *
@@ -65,6 +103,15 @@ export function createLazyLoad(options = {}) {
     // Clamp before iterating, including for integers above Number.MAX_SAFE_INTEGER.
     const loop = context.isLoop()
     const radius = Math.min(preloadCount, count - 1)
+    const geometry = context.getNavigationGeometry?.()
+    if (geometry && !geometry.uniform) {
+      for (const index of physicalPreloads(geometry, idx, loop, radius)) {
+        if (ctx !== context || context.getNavigationGeometry() !== geometry) return
+        const element = context.getSlideElement(index)
+        if (element && context.getSlide(index)?.lazy) loadSlide(element, index)
+      }
+      return
+    }
     const perView = includeVisible ? context.getSlidesPerView() : 1
     // The last finite page can begin before its logical target index when
     // slidesPerView is fractional. Include that partially visible first slide.

@@ -1,5 +1,7 @@
 // Core
 export { Carousel } from './Carousel.js'
+export { createSurfaceCrossfade, createSurfacePageTurn } from './transitions/surfaces.js'
+export type { SurfaceCrossfadeOptions, SurfacePageTurnOptions } from './transitions/surfaces.js'
 export const carouselStylesUrl: string
 
 // Plugins
@@ -18,6 +20,9 @@ export type { ControlsOptions, ControlsPlugin } from './plugins/controls.js'
 // Types
 export type {
   SlideData,
+  SlideContent,
+  SlideContentFactory,
+  SlideContentInstance,
   CarouselTransition,
   CarouselTransitionName,
   CarouselTransitionContext,
@@ -42,3 +47,12 @@ export type {
   CarouselSlideGeometry, CarouselRenderState, CarouselRenderSlide,
   SlideEffectDefinition, SlideEffectContext, SlideEffectInstance,
 } from './renderTypes.js'
+
+export type {
+  CarouselGeometrySlideDescriptor, CarouselGeometryContext, CarouselGeometrySlide,
+  CarouselGeometryMeasurement, CarouselGeometryDefinition, CarouselNavigationGeometry,
+  CarouselNavigationSlotDescriptor, CarouselNavigationSlot,
+} from './navigationTypes.js'
+export type {
+  CarouselSurfaceTransitionContext, CarouselSurfaceTransitionDefinition, CarouselSurfaceTransitionInstance,
+} from './transitionTypes.js'

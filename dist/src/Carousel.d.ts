@@ -1,4 +1,5 @@
 import type { CarouselRenderState } from './renderTypes.js'
+import type { CarouselNavigationGeometry } from './navigationTypes.js'
 import type { SlideData, SlidePatch, CarouselOptions, CarouselUpdateOptions, CarouselPlugin, CarouselEventMap } from './types.js'
 
 type Handler<Args extends unknown[]> = (...args: Args) => void
@@ -19,6 +20,7 @@ export class Carousel {
   getSlideElement(index?: number): HTMLElement | null
   getSlideElements(): HTMLElement[]
   getRenderState(): CarouselRenderState | null
+  getNavigationGeometry(): CarouselNavigationGeometry | null
   updateSlide(index: number, patch: SlidePatch): void
   moveSlide(from: number, to: number): void
   setSlides(slides: readonly SlideData[]): void

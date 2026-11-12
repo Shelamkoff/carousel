@@ -1,4 +1,4 @@
-import { getLastSlideIndex } from '../navigation.js'
+import { canNavigate } from './navigation.js'
 
 /**
  * One deadline owns both auto-advance and the public progress snapshot.
@@ -80,11 +80,7 @@ export function createAutoplay(options = {}) {
   }
 
   function canAdvance() {
-    if (!ctx) return false
-    const count = ctx.getSlideCount()
-    if (count <= 1) return false
-    if (ctx.isLoop()) return (ctx.getSlidesPerScroll?.() ?? 1) % count !== 0
-    return ctx.getIndex() < getLastSlideIndex(count, ctx.getSlidesPerView())
+    return canNavigate(ctx)
   }
 
   function schedule() {

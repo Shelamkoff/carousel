@@ -28,7 +28,9 @@
     .api-card h2 { margin: 0 0 12px; font-size: 26px; line-height: 1.15; }
     .api-card label { display: block; font-size: 12px; }
     .api-card input { display: block; width: 100%; margin-top: 6px; padding: 9px; border: 1px solid #adbdd4; border-radius: 3px; background: white; color: #263246; }
+    .api-note-state { display: block; margin-top: 8px; font-size: 12px; color: #d4e0ef; }
     #status { display: block; margin: 12px 0; font-variant-numeric: tabular-nums; }
+    #resources { display: block; font-variant-numeric: tabular-nums; }
     #events { white-space: pre-wrap; padding: 12px 0; color: #526078; min-height: 72px; }
     code { font-size: 13px; }
     .note { color: #526078; }
@@ -41,14 +43,16 @@
   <h1>Slide API playground</h1>
   <p>Type into a card, reorder the collection, or change its layout. Unchanged content keeps its DOM and input values. Content replacement and explicit refresh affect only the selected card.</p>
   <div class="settings" role="group" aria-label="Layout and effects">
-    <label><span id="layout-label">Layout</span> <select id="layout" aria-labelledby="layout-label"><option value="standard">Standard</option><option value="expand" selected>Expand</option><option value="custom">Custom compact stack</option></select></label>
+    <label><span id="layout-label">Layout</span> <select id="layout" aria-labelledby="layout-label"><option value="standard">Standard</option><option value="expand" selected>Expand</option><option value="custom">Custom compact stack</option><option value="variable">Variable slide sizes</option></select></label>
     <label><span id="orientation-label">Orientation</span> <select id="orientation" aria-labelledby="orientation-label"><option value="horizontal">Horizontal</option><option value="vertical">Vertical</option></select></label>
+    <label><span id="transition-label">Transition</span> <select id="transition" aria-labelledby="transition-label"><option value="slide">Slide</option><option value="crossfade">Surface crossfade</option><option value="page-turn">Surface page turn</option></select></label>
     <label><input id="focus-effect" type="checkbox"> Focus effect</label>
     <label><input id="caption-effect" type="checkbox" checked> Caption effect</label>
     <label><input id="parallax" type="checkbox"> Parallax</label>
   </div>
   <div id="gallery"></div>
   <output id="status" aria-live="polite"></output>
+  <output id="resources" class="note" aria-live="polite" aria-atomic="true"></output>
   <div class="actions" role="group" aria-label="Collection actions">
     <button id="move" type="button">Move selected to end</button>
     <button id="reverse" type="button">Reverse immutable list</button>
@@ -58,15 +62,23 @@
     <button id="append" type="button">Add card</button>
     <button id="remove" type="button">Remove selected</button>
   </div>
-  <p class="note"><code>updateSlide()</code>, <code>moveSlide()</code>, <code>setSlides()</code> and <code>refresh()</code> share reconciliation. Effects use the core frame, including drag and resize. Custom geometry does not replace logical navigation.</p>
+  <p class="note">Variable slide sizes use <code>geometry.measure()</code> for physical sizes and navigation targets. The compact stack uses <code>layout.render()</code> for presentation. Card factories return <code>{ element, destroy }</code>: refresh, replace or remove a card to see its cleanup count change.</p>
   <pre id="events" aria-label="Recent API events"></pre>
 </main>
 <script type="importmap">{"imports":{"@shelamkoff/event-bus":"./event-bus/index.js"}}</script>
 <script type="module">
   import { Carousel, createArrows, createKeyboard, createSwipe, createControls,
-    createSlideEffect, createFocusEffect, createParallax } from '../src/index.js'
+    createSlideEffect, createFocusEffect, createParallax,
+    createSurfaceCrossfade, createSurfacePageTurn } from '../src/index.js'
 
   const host = document.getElementById('gallery')
+  let liveContent = 0
+  let cleanups = 0
+  function showResources() {
+    const output = document.getElementById('resources')
+    output.dataset.live = String(liveContent); output.dataset.cleanups = String(cleanups)
+    output.textContent = `${liveContent} live content ${liveContent === 1 ? 'owner' : 'owners'} · ${cleanups} ${cleanups === 1 ? 'cleanup' : 'cleanups'}`
+  }
   const renderCard = (id, title) => () => {
     const card = document.createElement('article')
     card.className = 'api-card'
@@ -76,8 +88,15 @@
     const heading = document.createElement('h2'); heading.textContent = title
     const label = document.createElement('label'); label.textContent = `Note for card ${id + 1}`
     const input = document.createElement('input'); input.placeholder = 'Type here to test state preservation'
-    input.value = `Draft ${id + 1}`; label.append(input); body.append(heading, label); card.append(image, body)
-    return card
+    const noteState = document.createElement('span'); noteState.className = 'api-note-state'; noteState.textContent = 'Untouched draft'
+    const owner = new AbortController()
+    input.addEventListener('input', () => { noteState.textContent = 'Edited draft' }, { signal: owner.signal })
+    input.value = `Draft ${id + 1}`; label.append(input); body.append(heading, label, noteState); card.append(image, body)
+    liveContent++; showResources()
+    return { element: card, destroy() {
+      owner.abort()
+      liveContent--; cleanups++; showResources()
+    } }
   }
   let nextId = 4
   let revision = 0
@@ -118,21 +137,38 @@
   carousel.on('slide:change', () => show('Navigation settled'))
   carousel.on('effect:error', ({ name, error }) => show(`${name}: ${error.message}`))
   carousel.on('layout:error', ({ name, error }) => show(`${name}: ${error.message}`))
-  const compact = { name: 'compact-stack', render({ slides }) {
+  carousel.on('geometry:error', ({ name, error }) => show(`${name}: ${error.message}`))
+  carousel.on('transition:error', ({ name, error }) => show(`${name}: ${error.message}`))
+  const compact = { name: 'compact-stack', visibleSlides: 3, render({ slides }) {
     return slides.map(slide => ({ offset: slide.offset * .75, size: slide.size * .7, progress: slide.progress }))
   } }
+  const variable = { name: 'variable-card-sizes', measure({ slides, viewportSize, gap }) {
+    let offset = 0
+    return { slides: slides.map(({ id, index }) => {
+      const size = Math.max(180, viewportSize * (.54 + (Number(id ?? index) % 3) * .18))
+      const measurement = { offset, size }
+      offset += size + gap
+      return measurement
+    }) }
+  } }
+  const transitions = {
+    slide: 'slide', crossfade: createSurfaceCrossfade(), 'page-turn': createSurfacePageTurn(),
+  }
   function configure() {
     const layout = document.getElementById('layout').value
     carousel.update({
-      layout: layout === 'custom' ? compact : layout,
+      layout: layout === 'custom' ? compact : layout === 'variable' ? 'standard' : layout,
+      geometry: layout === 'variable' ? variable : undefined,
       slidesPerView: layout === 'expand' ? 1 : 1.6,
       orientation: document.getElementById('orientation').value,
+      transition: transitions[document.getElementById('transition').value],
       viewportHeight: 460,
     })
     show('Configuration updated; content retained')
   }
   document.getElementById('layout').addEventListener('change', configure)
   document.getElementById('orientation').addEventListener('change', configure)
+  document.getElementById('transition').addEventListener('change', configure)
   for (const [id, effect] of [['focus-effect', focus], ['caption-effect', caption], ['parallax', parallax]]) {
     document.getElementById(id).addEventListener('change', event => {
       if (event.target.checked) carousel.use(effect)

@@ -1,11 +1,22 @@
 import type { CarouselLayout, CarouselRenderState } from './renderTypes.js'
+import type { CarouselGeometryDefinition, CarouselNavigationGeometry } from './navigationTypes.js'
+import type { CarouselSurfaceTransitionDefinition } from './transitionTypes.js'
 
 /* ── Slide ── */
+
+export interface SlideContentInstance {
+  readonly element: HTMLElement
+  /** Release external resources exactly once when this content owner is retired. */
+  destroy?(): void
+}
+
+export type SlideContentFactory = () => HTMLElement | SlideContentInstance
+export type SlideContent = string | HTMLElement | SlideContentFactory
 
 export interface SlideData {
   /** Stable, unique collection identity for immutable reconciliation. */
   id?: string | number
-  content: string | HTMLElement | (() => HTMLElement)
+  content: SlideContent
   thumb?: string
   lazy?: boolean
   meta?: Record<string, unknown>
@@ -35,12 +46,13 @@ export interface CarouselTransitionInstance {
 }
 
 export interface CarouselTransitionDefinition {
+  readonly kind?: 'cover'
   readonly name: string
   /** Return a fresh synchronous renderer for each navigation. */
   create(context: CarouselTransitionContext): CarouselTransitionInstance
 }
 
-export type CarouselTransition = CarouselTransitionName | CarouselTransitionDefinition
+export type CarouselTransition = CarouselTransitionName | CarouselTransitionDefinition | CarouselSurfaceTransitionDefinition
 
 /* ── Plugin system ── */
 
@@ -67,6 +79,10 @@ export interface PluginContext {
 
   // Read-only state
   getRenderState(): CarouselRenderState | null
+  getNavigationGeometry(): CarouselNavigationGeometry | null
+  /** Resolve a logical next/previous page through the current navigation model. */
+  getNavigationTarget(direction: 1 | -1, fromIndex?: number): number
+  getPageTargets(anchorIndex?: number): number[]
   getIndex(): number
   getRealIndex(): number
   getSlide(index?: number): SlideData | null
@@ -115,6 +131,8 @@ export interface CarouselOptions {
   orientation?: 'horizontal' | 'vertical'
   /** 'expand' grows the active card and animates neighboring previews. */
   layout?: CarouselLayout
+  /** Physical slide sizes and snap points; visual layout remains independent. */
+  geometry?: CarouselGeometryDefinition
   /** Number of compact-card equivalents visible in expand mode. Default 2.5. */
   expandVisible?: number
   /** Active card size / compact card size. Default 2.5. */
@@ -157,12 +175,16 @@ export interface CarouselEventMap {
   'render': [state: CarouselRenderState]
   'render:reset': []
   'layout:error': [payload: { name: string; error: Error }]
+  'geometry:error': [payload: { name: string; error: Error }]
   'effect:error': [payload: { name: string; error: Error }]
   'slides:change': [payload: {
     type: 'add' | 'remove' | 'update' | 'move' | 'set' | 'refresh'
     previousCount: number
     count: number
     index: number
+    /** Point updates identify the affected logical slide and changed fields. */
+    updated?: readonly number[]
+    fields?: readonly ('content' | 'lazy' | 'meta' | 'thumb')[]
   }]
   'slide:beforeChange': [payload: { fromIndex: number; toIndex: number }]
   'slide:change': [payload: { index: number; prevIndex: number; slide: SlideData }]

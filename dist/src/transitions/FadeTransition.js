@@ -19,16 +19,20 @@ export class FadeTransition {
   #saved
   #trackStyle
   #size
+  #sizes
+  #copies
   #from
   #to
   #direction
   #progress = 0
   #destroyed = false
 
-  constructor(slides, track, size, viewportSize, orientation, from, to, direction) {
+  constructor(slides, track, size, viewportSize, orientation, from, to, direction, geometry, copies = []) {
     this.#slides = slides
     this.#track = track
     this.#size = size
+    this.#sizes = geometry?.slides.map(slide => slide.size)
+    this.#copies = copies.map(element => ({ element, styles: saveStyles(element.style, ['visibility']) }))
     this.#from = from
     this.#to = to
     this.#direction = direction || 1
@@ -40,13 +44,15 @@ export class FadeTransition {
       track.style.transform = 'none'
     }
     for (const [index, slide] of slides.entries()) {
+      const slideSize = this.#sizes?.[index] ?? size
       Object.assign(slide.style, {
-        position: 'absolute', top: '0', left: '0', width: vertical ? '100%' : size + 'px',
-        height: vertical ? size + 'px' : '', transform: '', transition: 'none',
+        position: 'absolute', top: '0', left: '0', width: vertical ? '100%' : slideSize + 'px',
+        height: vertical ? slideSize + 'px' : '', transform: '', transition: 'none',
         visibility: index === from || index === to ? 'visible' : 'hidden',
         opacity: index === from ? '1' : '0',
       })
     }
+    for (const { element } of this.#copies) element.style.visibility = 'hidden'
   }
 
   render(progress) {
@@ -58,7 +64,7 @@ export class FadeTransition {
 
   getSlots() {
     return this.#slides.map((element, index) => ({
-      element, index, copy: 0, isCopy: false, offset: 0, size: this.#size,
+      element, index, copy: 0, isCopy: false, offset: 0, size: this.#sizes?.[index] ?? this.#size,
       hidden: index !== this.#from && index !== this.#to,
       progress: index === this.#from ? -this.#direction * this.#progress
         : index === this.#to ? this.#direction * (1 - this.#progress) : index - this.#to,
@@ -69,6 +75,7 @@ export class FadeTransition {
     if (this.#destroyed) return
     this.#destroyed = true
     this.#slides.forEach((slide, index) => restoreStyles(slide.style, this.#saved[index]))
+    for (const { element, styles } of this.#copies) restoreStyles(element.style, styles)
     if (this.#track) restoreStyles(this.#track.style, this.#trackStyle)
   }
 }

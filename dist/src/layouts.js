@@ -4,14 +4,22 @@ import { synchronous } from './synchronous.js'
 export function isCarouselLayout(layout) {
   return layout === 'standard' || layout === 'expand' || !!(layout
     && typeof layout === 'object' && !Array.isArray(layout)
-    && typeof layout.name === 'string' && layout.name.trim() && typeof layout.render === 'function')
+    && typeof layout.name === 'string' && layout.name.trim() && typeof layout.render === 'function'
+    && (layout.visibleSlides === undefined || Number.isFinite(layout.visibleSlides) && layout.visibleSlides > 0))
+}
+
+/** Resolve built-in presentation choices outside the navigation coordinator. */
+export function getLayoutSizing(options) {
+  const slidesPerView = options.layout === 'expand' ? options.expandVisible : options.slidesPerView ?? 1
+  return { slidesPerView, visibleSlides: typeof options.layout === 'object'
+    ? options.layout.visibleSlides ?? slidesPerView : slidesPerView }
 }
 
 /** Layouts return geometry only; DOM ownership and the animation clock stay in core. */
 export function resolveLayoutSlots(layout, context, options) {
   if (layout === 'standard') return context.slides
   if (layout === 'expand') {
-    const position = context.step > 0 ? context.position / context.step : 0
+    const position = context.logicalPosition ?? (context.step > 0 ? context.position / context.step : 0)
     const geometry = getExpandGeometry(position, context.viewportSize, options.slidesPerView,
       options.expandRatio, options.expandPeek, context.gap, context.count, context.loop)
     return context.slides.map(slide => {

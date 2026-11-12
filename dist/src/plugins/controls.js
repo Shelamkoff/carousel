@@ -1,4 +1,4 @@
-import { getLastSlideIndex } from '../navigation.js'
+import { canNavigate } from './navigation.js'
 
 const DEFAULT_LABELS = {
   play: 'Play autoplay',
@@ -144,11 +144,7 @@ export function createControls(options = {}) {
   }
 
   function canPlay() {
-    if (!ctx) return false
-    const count = ctx.getSlideCount()
-    if (count <= 1) return false
-    if (ctx.isLoop()) return ctx.getSlidesPerScroll() % count !== 0
-    return ctx.getIndex() < getLastSlideIndex(count, ctx.getSlidesPerView())
+    return canNavigate(ctx)
   }
 
   function renderCounter() {

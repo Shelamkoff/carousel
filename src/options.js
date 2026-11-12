@@ -1,5 +1,6 @@
 import { isCarouselLayout } from './layouts.js'
 import { isViewportTransition } from './transitions/ViewportTransition.js'
+import { isSurfaceTransition } from './transitions/SurfaceTransition.js'
 
 /** @type {import('./types').CarouselOptions} */
 export const DEFAULTS = {
@@ -19,6 +20,11 @@ export const DEFAULTS = {
 }
 
 export function validateResolvedOptions(options) {
+  if (options.geometry !== undefined && (!options.geometry || typeof options.geometry !== 'object'
+    || Array.isArray(options.geometry) || typeof options.geometry.name !== 'string'
+    || !options.geometry.name.trim() || typeof options.geometry.measure !== 'function')) {
+    throw new TypeError('Carousel: geometry must define a non-empty name and measure(context)')
+  }
   if (!isCarouselLayout(options.layout)) {
     throw new TypeError('Carousel: layout must be a built-in name or a definition with name and render(context)')
   }
@@ -57,8 +63,9 @@ export function validateResolvedOptions(options) {
   if (!Number.isFinite(options.transitionDuration) || options.transitionDuration < 0) {
     throw new RangeError('Carousel: transitionDuration must be a non-negative number')
   }
-  if (options.transition !== 'slide' && options.transition !== 'fade' && !isViewportTransition(options.transition)) {
-    throw new TypeError('Carousel: transition must be a built-in name or a definition with name and create(context)')
+  if (options.transition !== 'slide' && options.transition !== 'fade'
+    && !isViewportTransition(options.transition) && !isSurfaceTransition(options.transition)) {
+    throw new TypeError('Carousel: transition must be a built-in name, cover definition, or valid surface definition')
   }
   if (!Number.isInteger(options.startIndex) || options.startIndex < 0) {
     throw new RangeError('Carousel: startIndex must be a non-negative integer')

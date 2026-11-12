@@ -6,6 +6,7 @@ export { getPanelCount, getPanelState } from './presets.js'
 export function isViewportTransition(transition) {
   if (typeof transition === 'string') return Object.hasOwn(viewportTransitionPresets, transition)
   return transition !== null && typeof transition === 'object' && !Array.isArray(transition)
+    && (transition.kind === undefined || transition.kind === 'cover')
     && typeof transition.name === 'string' && transition.name.trim().length > 0
     && typeof transition.create === 'function'
 }

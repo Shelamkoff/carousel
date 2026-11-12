@@ -20,6 +20,7 @@ export function createDots(options = {}) {
 
   function getTargets() {
     if (!ctx) return []
+    if (typeof ctx.getPageTargets === 'function') return ctx.getPageTargets(loopAnchor)
     const count = ctx.getSlideCount()
     if (count === 0) return []
     const step = Math.max(1, ctx.getSlidesPerScroll())
@@ -48,9 +49,13 @@ export function createDots(options = {}) {
     if (!ctx) return 0
     const targets = getTargets()
     const index = ctx.getIndex()
+    const geometry = ctx.getNavigationGeometry?.()
+    const position = geometry?.indexToPosition(index, ctx.isLoop())
+    const distance = target => geometry ? Math.abs(ctx.isLoop()
+      ? geometry.shortestDelta(position, target) : geometry.indexToPosition(target) - position) : Math.abs(target - index)
     let active = 0
     for (let i = 1; i < targets.length; i++) {
-      if (Math.abs(targets[i] - index) < Math.abs(targets[active] - index)) active = i
+      if (distance(targets[i]) < distance(targets[active])) active = i
     }
     return active
   }

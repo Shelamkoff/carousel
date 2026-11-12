@@ -1,4 +1,4 @@
-import { getLastSlideIndex } from '../navigation.js'
+import { canNavigate } from './navigation.js'
 
 const ARROW_SVG = {
   prev: '<svg class="carousel__arrow-icon" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6l6 6"/></svg>',
@@ -37,22 +37,14 @@ export function createArrows(options = {}) {
       nextBtn.style.display = 'none'
       return
     }
-    if (ctx.isLoop()) {
-      prevBtn.style.display = ''
-      nextBtn.style.display = ''
-      return
-    }
     if (!hideOnEdge) {
       prevBtn.style.display = ''
       nextBtn.style.display = ''
       return
     }
 
-    const index = ctx.getIndex()
-    const perView = ctx.getSlidesPerView()
-    const maxIndex = getLastSlideIndex(count, perView)
-    prevBtn.style.display = index <= 0 ? 'none' : ''
-    nextBtn.style.display = index >= maxIndex ? 'none' : ''
+    prevBtn.style.display = canNavigate(ctx, -1) ? '' : 'none'
+    nextBtn.style.display = canNavigate(ctx, 1) ? '' : 'none'
   }
 
   return {
