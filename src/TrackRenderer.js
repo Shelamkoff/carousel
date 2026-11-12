@@ -161,6 +161,10 @@ export class TrackRenderer {
       element.removeAttribute('name')
       if (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'FIELDSET', 'OPTION', 'OPTGROUP'].includes(element.tagName)) {
         element.disabled = true
+      } else if (element.constructor?.formAssociated === true) {
+        // Inert custom controls still participate in native form validation.
+        // Disable already-upgraded form-associated replicas before attachment.
+        element.setAttribute('disabled', '')
       }
       elements.push(...element.children)
     }
