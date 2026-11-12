@@ -1,6 +1,7 @@
+import { disableCopyControl } from '../dom.js'
+
 let sequence = 0
 
-const controls = new Set(['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'FIELDSET', 'OPTION', 'OPTGROUP'])
 const references = new Set(['for', 'headers', 'list', 'aria-labelledby', 'aria-describedby',
   'aria-controls', 'aria-owns', 'aria-flowto', 'aria-activedescendant', 'aria-details', 'aria-errormessage'])
 const embedded = new Set(['IFRAME', 'OBJECT', 'EMBED', 'SCRIPT'])
@@ -66,8 +67,7 @@ export function createSurfaceSnapshot(source, current = () => true) {
       if (/^on/i.test(attribute.name)) copy.removeAttribute(attribute.name)
     }
     for (const name of ['name', 'form', 'autofocus']) copy.removeAttribute(name)
-    if (controls.has(copy.tagName)) copy.disabled = true
-    else if (copy.constructor?.formAssociated === true) copy.setAttribute('disabled', '')
+    disableCopyControl(copy)
     if (copy.hasAttribute('contenteditable')) copy.setAttribute('contenteditable', 'false')
     if (copy.id) {
       const previous = copy.id

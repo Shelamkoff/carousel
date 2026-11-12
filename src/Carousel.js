@@ -9,6 +9,7 @@ import { TrackRenderer } from './TrackRenderer.js'
 import { LoopEngine } from './LoopEngine.js'
 import { BreakpointManager } from './BreakpointManager.js'
 import { isHTMLElement } from './dom.js'
+import { synchronous } from './synchronous.js'
 import { getNavigationTarget, getPageTargets } from './navigation.js'
 import { getLayoutSizing } from './layouts.js'
 import { ViewportTransition, isViewportTransition } from './transitions/ViewportTransition.js'
@@ -55,6 +56,7 @@ export class Carousel {
   #selectedIndex = 0
   #notifying = false
   #rebuilding = false
+  #pendingSelection = null
   #queuedNavigation = null
   #focusHandler = null
   #focusRequest = null
@@ -67,6 +69,7 @@ export class Carousel {
   #renderDirection = 0
   #transitionProgress = null
   #transitionDirection = 0
+  #idleNotification = null
 
   constructor(container, slides, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options)) {
@@ -340,10 +343,15 @@ export class Carousel {
     }
   }
 
-  #resetRender() {
+  #resetRender(index) {
     const previous = this.#activeReset
     this.#activeReset = ++this.#resetSerial
-    try { this.#events.emit('render:reset') }
+    try {
+      // A nested reset can retire the outer event before later plugins see
+      // its scope. Escalate to a full reset so it also covers that outer work.
+      if (index === undefined || previous !== null) this.#events.emit('render:reset')
+      else this.#events.emit('render:reset', Object.freeze({ indices: Object.freeze([index]) }))
+    }
     finally { this.#activeReset = previous }
   }
 
@@ -366,32 +374,37 @@ export class Carousel {
   }
 
   #handleBreakpointChange() {
-    const oldIdx = this.getIndex()
-    const epoch = this.#stopAllAnimations()
-    if (this.#destroyed || this.#navigationEpoch !== epoch) return
-    this.#pendingResize = false
-    this.#pendingResizeStep = null
-    this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
-    const opts = this.#resolvedOptions
-    this.#dispatchEvents(() => {
-      this.#resetRender()
-      if (this.#destroyed || this.#navigationEpoch !== epoch) return
-      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout())
-      if (this.#destroyed || this.#navigationEpoch !== epoch) return
-      this.#initLoop()
-      this.#position = this.#geometry.indexToPosition(oldIdx, !!this.#loop)
-      this.#selectedIndex = oldIdx
-      if (!this.#render()) return
-      this.#selectedIndex = this.getIndex()
-      this.#rebuilding = false
-      this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
-    }, true)
+    const oldIdx = this.#collectionIndex()
+    const selection = this.#beginCollectionSelection(oldIdx)
+    try {
+      this.#dispatchEvents(() => {
+        const epoch = this.#stopAllAnimations()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#pendingResize = false
+        this.#pendingResizeStep = null
+        this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
+        const opts = this.#resolvedOptions
+        this.#resetRender()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout())
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#initLoop()
+        this.#position = this.#geometry.indexToPosition(oldIdx, !!this.#loop)
+        this.#selectedIndex = oldIdx
+        this.#endCollectionSelection(selection)
+        if (!this.#render()) return
+        this.#selectedIndex = this.getIndex()
+        this.#rebuilding = false
+        this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
+      }, true)
+    } finally { this.#endCollectionSelection(selection) }
   }
 
   /* ═══════════════ Animation ═══════════════ */
 
   /** Stop all running animations (rAF, CSS transition, fade). */
   #stopAllAnimations() {
+    const wasMoving = this.#animating || this.#renderPhase === 'drag'
     const epoch = ++this.#navigationEpoch
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
     if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
@@ -401,11 +414,37 @@ export class Carousel {
     this.#renderState = null
     this.#renderPhase = 'idle'
     this.#renderDirection = 0
+    if (wasMoving) this.#notifyMotionIdle('cancel')
     this.#cancelFade()
     if (this.#navigationEpoch !== epoch) return epoch
     this.#trackRenderer.stopAnimation()
     if (this.#viewportTransition) this.#destroyViewportTransition(this.#viewportTransition)
     return epoch
+  }
+
+  /**
+   * Publish a settled motion boundary without constructing per-slide frames.
+   * Cleanup, pointer handlers and callbacks can replace motion synchronously;
+   * notify only once their final state is idle, never between two owners.
+   */
+  #notifyMotionIdle(reason) {
+    if (this.#destroyed) return
+    const notification = this.#idleNotification = { reason }
+    const publish = () => {
+      if (this.#idleNotification !== notification) return
+      if (this.#destroyed || this.#animating || this.#renderPhase !== 'idle') {
+        this.#idleNotification = null
+        return
+      }
+      // stopAnimation() can run inside transition:start before that event
+      // batch queues replacement navigation. Wait for the queue to drain;
+      // a queued no-op must still allow the final cancellation to publish.
+      if (this.#queuedNavigation) { queueMicrotask(publish); return }
+      this.#idleNotification = null
+      const payload = { index: this.getIndex(), position: this.#position, reason }
+      this.#dispatchEvents(() => this.#events.emit('motion:idle', payload))
+    }
+    queueMicrotask(publish)
   }
 
   #destroyViewportTransition(transition) {
@@ -457,6 +496,9 @@ export class Carousel {
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#events.emit('slide:change', { index: idx, prevIndex: previous, slide })
     })
+    // Zero-duration decorative transitions and failed factories can complete
+    // directly, without entering the shared animation clock.
+    if (!this.#destroyed && this.#navigationEpoch === epoch) this.#notifyMotionIdle('complete')
   }
 
   /**
@@ -506,12 +548,13 @@ export class Carousel {
     ownedPluginInstances.add(plugin)
     this.#installingPluginNames.add(name)
     try {
-      plugin.install(ctx)
+      synchronous(plugin.install(ctx), `plugin "${name}" install()`)
       // install() may synchronously call carousel.destroy().
       if (this.#destroyed) throw new Error(`Carousel was destroyed while installing plugin "${name}"`)
       this.#plugins.set(name, { plugin, context: ctx, cleanupContext: cleanup })
     } catch (error) {
-      try { plugin.destroy?.() } catch { /* preserve the installation error */ }
+      try { synchronous(plugin.destroy?.(), `plugin "${name}" destroy()`) }
+      catch { /* preserve the installation error */ }
       cleanup()
       ownedPluginInstances.delete(plugin)
       throw error
@@ -527,7 +570,7 @@ export class Carousel {
     const entry = this.#plugins.get(name)
     if (!entry) return false
     this.#plugins.delete(name)
-    try { entry.plugin.destroy?.() }
+    try { synchronous(entry.plugin.destroy?.(), `plugin "${name}" destroy()`) }
     finally {
       entry.cleanupContext()
       ownedPluginInstances.delete(entry.plugin)
@@ -620,7 +663,7 @@ export class Carousel {
         const epoch = this.#navigationEpoch
         let rendered = false
         this.#dispatchEvents(() => {
-          this.#resetRender()
+          this.#resetRender(i)
           if (this.#destroyed || this.#navigationEpoch !== epoch) return
           rendered = this.#trackRenderer.renderSlide(i, slide)
           if (!this.#destroyed && this.#navigationEpoch === epoch) this.#render()
@@ -628,8 +671,11 @@ export class Carousel {
         return rendered && !this.#destroyed && this.#navigationEpoch === epoch
       },
       refreshLayout: () => this.#trackRenderer.refreshLayout(),
-    }, event => event !== 'render:reset' || this.#activeReset === null
-      || this.#activeReset === this.#resetSerial)
+    }, event => {
+      if (event === 'motion:idle') return !this.#animating && this.#renderPhase === 'idle'
+      return event !== 'render:reset' || this.#activeReset === null
+        || this.#activeReset === this.#resetSerial
+    })
   }
 
   /* ═══════════════ Navigation ═══════════════ */
@@ -939,6 +985,7 @@ export class Carousel {
       this.#transitionProgress = null
       done()
       if (current()) this.#publishRenderState('idle')
+      if (current()) this.#notifyMotionIdle('complete')
     }
     if (duration <= 0) {
       draw(1)
@@ -989,10 +1036,32 @@ export class Carousel {
   getSlideElement(index = this.getIndex()) { return this.#trackRenderer.getSlideElement(index) }
   getSlideElements() { return [...this.#trackRenderer.getSlideElements()] }
 
+  // Logical data is published before its DOM/position during reconciliation.
+  // Nested mutations preserve this owned selection until the new position is
+  // committed; public getIndex() continues to describe the rendered position.
+  #collectionIndex() {
+    const pending = this.#pendingSelection
+    if (!pending) return this.getIndex()
+    const retained = this.#slideManager.indexOfKey(pending.key)
+    return retained >= 0 ? retained
+      : Math.max(0, Math.min(pending.index, this.getSlideCount() - 1))
+  }
+
+  #beginCollectionSelection(index) {
+    const bounded = Math.max(0, Math.min(index, this.getSlideCount() - 1))
+    const selection = { key: this.#slideManager.getKey(bounded), index: bounded }
+    this.#pendingSelection = selection
+    return selection
+  }
+
+  #endCollectionSelection(selection) {
+    if (this.#pendingSelection === selection) this.#pendingSelection = null
+  }
+
   /** Replace only the supplied fields; ids remain stable for the life of a slide. */
   updateSlide(index, patch) {
     if (this.#destroyed) return
-    const selected = this.getIndex()
+    const selected = this.#collectionIndex()
     const mutation = this.#slideManager.updateSlide(index, patch)
     const fields = ['content', 'lazy', 'meta', 'thumb'].filter(field => Object.hasOwn(patch, field))
     const change = { type: 'update', previousCount: this.getSlideCount(), updated: [index], fields }
@@ -1015,34 +1084,38 @@ export class Carousel {
   }
 
   #updateRetainedSlide(index, slide, selected, refreshContent, change) {
-    const epoch = this.#stopAllAnimations()
-    if (this.#destroyed || this.#navigationEpoch !== epoch) return
-    this.#pendingResize = false
-    this.#pendingResizeStep = null
-    this.#dispatchEvents(() => {
-      this.#resetRender()
-      if (this.#destroyed || this.#navigationEpoch !== epoch) return
-      if (!this.#trackRenderer.updateSlide(index, slide, { refreshContent })) return
-      if (this.#destroyed || this.#navigationEpoch !== epoch) return
-      this.#initLoop()
-      this.#selectedIndex = selected
-      this.#position = this.#geometry.indexToPosition(selected, !!this.#loop)
-      if (!this.#render()) return
-      this.#selectedIndex = this.getIndex()
-      this.#rebuilding = false
-      // Existing plugins use this event to retire a gesture and discover newly
-      // pending lazy content. Unchanged wrappers and content owners are retained.
-      this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
-      if (!this.#destroyed && this.#navigationEpoch === epoch) {
-        this.#events.emit('slides:change', { ...change, count: this.getSlideCount(), index: this.getIndex() })
-      }
-    }, true)
+    const selection = this.#beginCollectionSelection(selected)
+    try {
+      this.#dispatchEvents(() => {
+        const epoch = this.#stopAllAnimations()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#pendingResize = false
+        this.#pendingResizeStep = null
+        this.#resetRender(index)
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        if (!this.#trackRenderer.updateSlide(index, slide, { refreshContent })) return
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#initLoop()
+        this.#selectedIndex = selected
+        this.#position = this.#geometry.indexToPosition(selected, !!this.#loop)
+        this.#endCollectionSelection(selection)
+        if (!this.#render()) return
+        this.#selectedIndex = this.getIndex()
+        this.#rebuilding = false
+        // Existing plugins use this event to retire a gesture and discover newly
+        // pending lazy content. Unchanged wrappers and content owners are retained.
+        this.#events.emit('resize', { slidesPerView: this.#resolvedOptions.slidesPerView ?? 1 })
+        if (!this.#destroyed && this.#navigationEpoch === epoch) {
+          this.#events.emit('slides:change', { ...change, count: this.getSlideCount(), index: this.getIndex() })
+        }
+      }, true)
+    } finally { this.#endCollectionSelection(selection) }
   }
 
   /** Move an existing slide to a final array index without recreating its content. */
   moveSlide(from, to) {
     if (this.#destroyed) return
-    const selected = this.#slideManager.getKey(this.getIndex())
+    const selected = this.#slideManager.getKey(this.#collectionIndex())
     if (!this.#slideManager.moveSlide(from, to)) return
     this.#rebuildTrack(this.#slideManager.indexOfKey(selected), false, {
       type: 'move', previousCount: this.getSlideCount(),
@@ -1052,7 +1125,7 @@ export class Carousel {
   /** Reconcile by explicit id, or by object identity when no id was supplied. */
   setSlides(slides) {
     if (this.#destroyed) return
-    const previousIndex = this.getIndex()
+    const previousIndex = this.#collectionIndex()
     const selected = this.#slideManager.getKey(previousIndex)
     const previousCount = this.getSlideCount()
     this.#slideManager.setSlides(slides)
@@ -1066,11 +1139,11 @@ export class Carousel {
     if (index !== undefined) this.#slideManager.assertIndex(index)
     const change = { type: 'refresh', previousCount: this.getSlideCount() }
     if (index !== undefined && !this.#rebuilding && !this.#trackRenderer.isMeasuringGeometry) {
-      this.#updateRetainedSlide(index, this.#slideManager.getSlide(index), this.getIndex(), true,
+      this.#updateRetainedSlide(index, this.#slideManager.getSlide(index), this.#collectionIndex(), true,
         { ...change, updated: [index], fields: ['content'] })
       return
     }
-    this.#rebuildTrack(this.getIndex(), index === undefined ? true
+    this.#rebuildTrack(this.#collectionIndex(), index === undefined ? true
       : new Set([this.#slideManager.getKey(index)]), change)
   }
 
@@ -1080,7 +1153,7 @@ export class Carousel {
     if (index !== undefined && !Number.isInteger(index)) {
       throw new TypeError('Carousel: slide index must be an integer')
     }
-    const currentIndex = this.getIndex()
+    const currentIndex = this.#collectionIndex()
     const insertionIndex = index === undefined
       ? this.#slideManager.getSlideCount()
       : Math.max(0, Math.min(index, this.#slideManager.getSlideCount()))
@@ -1094,36 +1167,42 @@ export class Carousel {
     if (this.#destroyed) return
     const count = this.#slideManager.getSlideCount()
     if (!Number.isInteger(index) || index < 0 || index >= count) return
-    const currentIndex = this.getIndex()
+    const currentIndex = this.#collectionIndex()
     this.#slideManager.removeSlide(index)
     this.#rebuildTrack(index < currentIndex ? currentIndex - 1 : currentIndex, false, {
       type: 'remove', previousCount: count,
     })
   }
 
-  #rebuildTrack(index = this.getIndex(), refreshContent = false, change) {
-    const epoch = this.#stopAllAnimations()
-    if (this.#destroyed || this.#navigationEpoch !== epoch) return
-    this.#pendingResize = false
-    this.#pendingResizeStep = null
-    const opts = this.#resolvedOptions
-    this.#dispatchEvents(() => {
-      this.#resetRender()
-      if (this.#destroyed || this.#navigationEpoch !== epoch) return
-      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout(), refreshContent)
-      if (this.#destroyed || this.#navigationEpoch !== epoch) return
-      this.#initLoop()
-      const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
-      this.#position = this.#geometry.indexToPosition(Math.max(0, idx), !!this.#loop)
-      this.#selectedIndex = Math.max(0, idx)
-      if (!this.#render()) return
-      this.#selectedIndex = this.getIndex()
-      this.#rebuilding = false
-      this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
-      if (change && !this.#destroyed && this.#navigationEpoch === epoch) {
-        this.#events.emit('slides:change', { ...change, count: this.getSlideCount(), index: this.getIndex() })
-      }
-    }, true)
+  #rebuildTrack(index = this.#collectionIndex(), refreshContent = false, change) {
+    const selection = this.#beginCollectionSelection(index)
+    try {
+      // Teardown callbacks belong to this reconciliation too. They must not
+      // address an old wrapper ordering after the collection has already changed.
+      this.#dispatchEvents(() => {
+        const epoch = this.#stopAllAnimations()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#pendingResize = false
+        this.#pendingResizeStep = null
+        const opts = this.#resolvedOptions
+        this.#resetRender()
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout(), refreshContent)
+        if (this.#destroyed || this.#navigationEpoch !== epoch) return
+        this.#initLoop()
+        const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
+        this.#position = this.#geometry.indexToPosition(Math.max(0, idx), !!this.#loop)
+        this.#selectedIndex = Math.max(0, idx)
+        this.#endCollectionSelection(selection)
+        if (!this.#render()) return
+        this.#selectedIndex = this.getIndex()
+        this.#rebuilding = false
+        this.#events.emit('resize', { slidesPerView: opts.slidesPerView ?? 1 })
+        if (change && !this.#destroyed && this.#navigationEpoch === epoch) {
+          this.#events.emit('slides:change', { ...change, count: this.getSlideCount(), index: this.getIndex() })
+        }
+      }, true)
+    } finally { this.#endCollectionSelection(selection) }
   }
 
   update(options) {
@@ -1141,7 +1220,7 @@ export class Carousel {
     if (Object.prototype.hasOwnProperty.call(options, 'startIndex')) {
       throw new TypeError('Carousel: startIndex is constructor-only')
     }
-    const currentIndex = this.getIndex()
+    const currentIndex = this.#collectionIndex()
     const previousOptions = this.#options
     const nextOptions = { ...previousOptions, ...options }
     validateOptionsTree(nextOptions)
@@ -1191,6 +1270,8 @@ export class Carousel {
   destroy() {
     if (this.#destroyed) return
     this.#destroyed = true
+    this.#idleNotification = null
+    this.#pendingSelection = null
     this.#focusRequest = null
     this.#trackRenderer.getViewport()?.removeEventListener('focusin', this.#focusHandler, true)
     this.#focusHandler = null
@@ -1209,6 +1290,7 @@ export class Carousel {
     this.#slideManager.clear()
     this.#renderState = null
     this.#geometry = null
+    this.#loop = null
     this.#container = null
     this.#options = {}
     this.#resolvedOptions = {}

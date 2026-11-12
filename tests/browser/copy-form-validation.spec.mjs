@@ -54,4 +54,44 @@ for (const lazy of [false, true]) {
     expect(result).toEqual({ originalValid: true, originalWillValidate: true, copyExists: true,
       copyWillValidate: false, formValid: true, values: [['field', 'Valid original']], decorationDisabled: false })
   })
+
+  test(`late custom-control upgrades leave external form validation with the original (lazy ${lazy})`, async ({ page }) => {
+    const result = await page.evaluate(async lazy => {
+      const { Carousel, createLazyLoad } = await import('/src/index.js')
+      const form = document.createElement('form')
+      form.id = 'external-form'
+      const host = document.createElement('div')
+      host.style.width = '400px'
+      document.body.append(form, host)
+      const carousel = new Carousel(host, [{ lazy,
+        content: '<late-reconciled-field name="field" form="external-form"></late-reconciled-field>',
+      }], { loop: true, transitionDuration: 0, plugins: lazy ? [createLazyLoad({ preload: 0 })] : [] })
+      try {
+        const original = carousel.getSlideElement(0).firstElementChild
+        const copy = host.querySelector('[data-carousel-copy] late-reconciled-field')
+        const disabledBeforeUpgrade = copy.hasAttribute('disabled')
+        customElements.define('late-reconciled-field', class extends HTMLElement {
+          static formAssociated = true
+          constructor() {
+            super()
+            this.internals = this.attachInternals()
+            this.internals.setValidity({ valueMissing: true }, 'Required')
+          }
+          set value(value) {
+            this.internals.setFormValue(value)
+            this.internals.setValidity({})
+          }
+        })
+        const invalidOriginal = form.checkValidity()
+        original.value = 'Updated original'
+        return { disabledBeforeUpgrade, originalWillValidate: original.internals.willValidate,
+          copyWillValidate: copy.internals.willValidate, invalidOriginal,
+          validOriginal: form.checkValidity(), originalForm: original.internals.form === form,
+          values: [...new FormData(form)] }
+      } finally { carousel.destroy(); host.remove(); form.remove() }
+    }, lazy)
+    expect(result).toEqual({ disabledBeforeUpgrade: true, originalWillValidate: true,
+      copyWillValidate: false, invalidOriginal: false, validOriginal: true,
+      originalForm: true, values: [['field', 'Updated original']] })
+  })
 }

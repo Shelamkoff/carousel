@@ -144,6 +144,110 @@ function environment(t, configuration = {}) {
   }
 }
 
+test('explicit autoplay start waits for live motion after a stopping pointer interaction', async t => {
+  const env = environment(t, { manualTransition: true })
+  let phase = 'idle'
+  env.context.getRenderState = () => ({ phase })
+  const autoplay = env.install(createAutoplay({ interval: 1000,
+    pauseOnHover: false, pauseOnFocus: false, pauseOnInteraction: true }))
+  phase = 'animation'
+  env.context.next()
+  env.viewport.dispatch('pointerdown', { pointerId: 1 })
+  env.view.dispatch('pointerup', { pointerId: 1 })
+  await Promise.resolve()
+  autoplay.start()
+  assert.equal(autoplay.getState().active, true)
+  assert.equal(autoplay.getState().paused, true)
+  assert.equal(autoplay.getState().running, false)
+  assert.equal(env.timers.size, 0)
+
+  phase = 'idle'
+  env.context.emit('motion:idle', { index: env.index, position: 100, reason: 'complete' })
+  assert.equal(autoplay.getState().running, true)
+  // start() also reconciles a running countdown if a custom snap-back began
+  // without slide:beforeChange while playback was already active.
+  phase = 'animation'
+  autoplay.start()
+  assert.equal(autoplay.getState().paused, true)
+  assert.equal(env.timers.size, 0)
+})
+
+test('explicit autoplay start resumes after external cancellation without a completion event', t => {
+  const env = environment(t, { manualTransition: true })
+  let phase = 'idle'
+  env.context.getRenderState = () => ({ phase })
+  const autoplay = env.install(createAutoplay({ interval: 1000,
+    pauseOnHover: false, pauseOnFocus: false, pauseOnInteraction: false }))
+  phase = 'animation'
+  env.context.next()
+  assert.equal(autoplay.getState().paused, true)
+  phase = 'idle' // A gesture plugin called context.stopAnimation().
+  autoplay.start()
+  assert.equal(autoplay.getState().running, true)
+  assert.equal(autoplay.getState().paused, false)
+  assert.equal(env.timers.size, 1)
+  env.advance(1000)
+  assert.equal(env.nextCalls, 2)
+})
+
+for (const pauseOnInteraction of [true, false]) {
+  test(`explicit autoplay start waits for every held pointer with pauseOnInteraction=${pauseOnInteraction}`, async t => {
+    const env = environment(t)
+    env.context.getRenderState = () => ({ phase: 'idle' })
+    const autoplay = env.install(createAutoplay({ interval: 1000,
+      pauseOnHover: false, pauseOnFocus: false, pauseOnInteraction }))
+    env.advance(250)
+    env.viewport.dispatch('pointerdown', { pointerId: 1 })
+    env.viewport.dispatch('pointerdown', { pointerId: 2 })
+    autoplay.start()
+    assert.equal(autoplay.getState().active, true)
+    assert.equal(autoplay.getState().paused, true)
+    assert.equal(env.timers.size, 0)
+    env.view.dispatch('pointerup', { pointerId: 1 })
+    await Promise.resolve()
+    assert.equal(autoplay.getState().paused, true)
+    assert.equal(env.timers.size, 0)
+    env.view.dispatch('pointercancel', { pointerId: 2 })
+    await Promise.resolve()
+    assert.equal(autoplay.getState().running, true)
+    assert.equal(autoplay.getState().remaining, 750)
+    assert.equal(env.timers.size, 1)
+
+    env.viewport.dispatch('pointerdown', { pointerId: 3 })
+    env.view.dispatch('pointerup', { pointerId: 3 })
+    await Promise.resolve()
+    assert.equal(autoplay.getState().active, !pauseOnInteraction,
+      'releasing a new interaction cannot restart playback stopped by that interaction')
+  })
+}
+
+for (const reason of ['cancel', 'complete']) {
+  test(`motion idle resumes autoplay after ${reason === 'cancel' ? 'standalone stopAnimation' : 'snap-back completion'}`, t => {
+    const env = environment(t, { manualTransition: true })
+    let phase = 'idle'
+    env.context.getRenderState = () => ({ phase })
+    const autoplay = env.install(createAutoplay({ interval: 1000,
+      pauseOnHover: false, pauseOnFocus: false, pauseOnInteraction: false }))
+    phase = 'animation'
+    env.context.next()
+    env.advance(2000)
+    assert.equal(env.nextCalls, 1)
+    assert.equal(autoplay.getState().running, false)
+    phase = 'idle'
+    env.context.emit('motion:idle', { index: env.index, position: 100, reason })
+    assert.equal(autoplay.getState().running, true)
+    assert.equal(env.timers.size, 1)
+    env.advance(250)
+    // A completion notification already handled by end/resize must not reset
+    // a newly running countdown or create a second deadline.
+    env.context.emit('motion:idle', { index: env.index, position: 100, reason })
+    assert.equal(autoplay.getState().remaining, 750)
+    assert.equal(env.timers.size, 1)
+    env.advance(750)
+    assert.equal(env.nextCalls, 2)
+  })
+}
+
 test('autoplay shares an exact deadline with progress, preserves stop/start and hover time', t => {
   const env = environment(t)
   const autoplay = env.install(createAutoplay({ interval: 1000 }))
@@ -228,9 +332,9 @@ for (const swipeFirst of [false, true]) {
     assert.equal(autoplay.getState().running, false)
     env.advance(500)
     assert.equal(autoplay.getState().remaining, 1000)
-    // Snapback has no transition:end: the shared idle frame settles it.
+    // Snapback has no transition:end: the settled motion notification resumes it.
     phase = 'idle'
-    env.context.emit('render', { phase })
+    env.context.emit('motion:idle', { index: env.index, position: 100, reason: 'complete' })
     assert.equal(autoplay.getState().running, true)
     env.advance(999)
     assert.equal(env.nextCalls, 1)
@@ -242,12 +346,12 @@ for (const swipeFirst of [false, true]) {
     await Promise.resolve()
     autoplay.destroy()
     phase = 'idle'
-    env.context.emit('render', { phase })
-    assert.equal(env.timers.size, 0, 'removed autoplay must retire its temporary render subscription')
+    env.context.emit('motion:idle', { index: env.index, position: 100, reason: 'complete' })
+    assert.equal(env.timers.size, 0, 'removed autoplay must retire its motion subscription')
   })
 }
 
-for (const completion of ['transition:end', 'render']) {
+for (const completion of ['transition:end', 'motion:idle']) {
   test(`installing autoplay during motion waits for ${completion}`, t => {
     const env = environment(t, { manualTransition: true })
     let phase = 'animation'
@@ -261,7 +365,7 @@ for (const completion of ['transition:end', 'render']) {
     assert.equal(env.nextCalls, 0)
 
     phase = 'idle'
-    env.context.emit(completion, completion === 'render' ? { phase } : { index: 0 })
+    env.context.emit(completion, { index: 0, position: 0, reason: 'complete' })
     assert.equal(autoplay.getState().running, true)
     env.advance(999)
     assert.equal(env.nextCalls, 0)

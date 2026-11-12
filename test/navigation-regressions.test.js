@@ -38,6 +38,10 @@ class Element {
   get childNodes() { return this.nodes }
   get children() { return this.nodes }
   get firstChild() { return this.nodes[0] ?? null }
+  get firstElementChild() { return this.nodes[0] ?? null }
+  get nextElementSibling() {
+    return this.parentNode?.children[this.parentNode.children.indexOf(this) + 1] ?? null
+  }
   get offsetWidth() { return this.width ?? this.parentNode?.offsetWidth ?? 100 }
   get offsetHeight() { return 20 }
   get scrollHeight() { return 20 }

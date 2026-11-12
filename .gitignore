@@ -4,3 +4,4 @@ dist/
 .npm-cache/
 test-results/
 playwright-report/
+/performance-results.json

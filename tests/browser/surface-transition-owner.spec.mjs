@@ -145,6 +145,48 @@ test('surface copies of form-associated custom controls cannot invalidate the or
     values: [['custom', 'valid original']], decorationDisabled: false })
 })
 
+test('custom controls defined after snapshot capture cannot invalidate the live form', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { SurfaceTransition } = await import('/src/transitions/SurfaceTransition.js')
+    document.body.innerHTML += '<form id="surface-form"><div class="viewport"><div class="track"><div class="slide"><late-surface-field name="field" form="surface-form"></late-surface-field></div><div class="slide">B</div></div></div></form>'
+    const form = document.querySelector('form')
+    const viewport = form.querySelector('.viewport')
+    const track = form.querySelector('.track')
+    const original = track.querySelector('late-surface-field')
+    let context
+    const owner = new SurfaceTransition(viewport, { kind: 'surfaces', name: 'late-form-associated', createSurfaces(value) {
+      context = value
+      return { render() {} }
+    } }, { fromElement: track.children[0], toElement: track.children[1], trackElement: track,
+      fromIndex: 0, toIndex: 1, direction: 1, orientation: 'horizontal', viewportSize: 400 })
+    try {
+      owner.initialize()
+      const copy = context.from.querySelector('late-surface-field')
+      const disabledBeforeUpgrade = copy.hasAttribute('disabled')
+      customElements.define('late-surface-field', class extends HTMLElement {
+        static formAssociated = true
+        constructor() {
+          super()
+          this.internals = this.attachInternals()
+          this.internals.setValidity({ valueMissing: true }, 'Required')
+        }
+        set value(value) {
+          this.internals.setFormValue(value)
+          this.internals.setValidity({})
+        }
+      })
+      const invalidOriginal = form.checkValidity()
+      original.value = 'Updated original'
+      return { disabledBeforeUpgrade, originalWillValidate: original.internals.willValidate,
+        copyWillValidate: copy.internals.willValidate, invalidOriginal,
+        validOriginal: form.checkValidity(), values: [...new FormData(form)] }
+    } finally { owner.destroy() }
+  })
+  expect(result).toEqual({ disabledBeforeUpgrade: true, originalWillValidate: true,
+    copyWillValidate: false, invalidOriginal: false, validOriginal: true,
+    values: [['field', 'Updated original']] })
+})
+
 test('snapshot connection can cancel its owner before the factory runs', async ({ page }) => {
   const result = await page.evaluate(async () => {
     const { SurfaceTransition } = await import('/src/transitions/SurfaceTransition.js')

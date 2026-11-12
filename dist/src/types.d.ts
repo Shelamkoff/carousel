@@ -118,7 +118,9 @@ export interface PluginContext {
 
 export interface CarouselPlugin {
   name: string
+  /** Synchronous setup. Start asynchronous work separately and cancel it in destroy(). */
   install(context: PluginContext): void
+  /** Synchronous cleanup, including after a partially failed install(). */
   destroy?(): void
   [key: string]: unknown
 }
@@ -173,7 +175,8 @@ export interface AutoplayState {
 
 export interface CarouselEventMap {
   'render': [state: CarouselRenderState]
-  'render:reset': []
+  /** Omitted scope means a full reset; indices target retained logical slides and their copies. */
+  'render:reset': [scope?: { readonly indices: readonly number[] }]
   'layout:error': [payload: { name: string; error: Error }]
   'geometry:error': [payload: { name: string; error: Error }]
   'effect:error': [payload: { name: string; error: Error }]
@@ -190,6 +193,8 @@ export interface CarouselEventMap {
   'slide:change': [payload: { index: number; prevIndex: number; slide: SlideData }]
   'transition:start': [payload: { fromIndex: number; toIndex: number }]
   'transition:end': [payload: { index: number }]
+  /** Coalesced microtask after navigation, snapback or cancellation settles idle. */
+  'motion:idle': [payload: { index: number; position: number; reason: 'complete' | 'cancel' }]
   'transition:error': [payload: { name: string; error: Error }]
   'resize': [payload: { slidesPerView: number }]
   'autoplay:start': []

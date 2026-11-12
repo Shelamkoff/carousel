@@ -26,6 +26,7 @@
     "demo": "node scripts/build-demo.mjs && node scripts/dev-server.mjs /index.html",
     "test": "node --test",
     "test:browser": "playwright test",
+    "benchmark": "node scripts/benchmark-performance.mjs",
     "typecheck": "tsc -p type-tests/tsconfig.json",
     "check": "npm run test && npm run typecheck && npm run build && npm run build:demo",
     "prepublishOnly": "npm run check",

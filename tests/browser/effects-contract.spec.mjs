@@ -160,3 +160,88 @@ test('a superseded reset cannot clear styles and wrappers from a nested rebuild'
   expect(result.values).toEqual(['1', '0'])
   expect(result.wrappers).toBe(2)
 })
+
+for (const loop of [false, true]) {
+  test(`targeted parallax resets preserve other native layers${loop ? ' and loop copies' : ''}`, async ({ page }) => {
+    const result = await page.evaluate(async loop => {
+      const { Carousel, createParallax } = await import('/src/index.js')
+      const host = document.createElement('div')
+      host.style.width = '500px'
+      document.body.append(host)
+      const carousel = new Carousel(host, [0, 1].map(index => ({
+        content: () => {
+          const card = document.createElement('article')
+          card.style.height = '160px'
+          card.innerHTML = `<input value="Card ${index}">`
+          return card
+        },
+      })), { transitionDuration: 0, loop, slidesPerView: loop ? 2.5 : 1, plugins: [createParallax()] })
+      try {
+        const untouched = [...host.querySelectorAll('.carousel__slide[data-index="0"]')]
+          .map(slide => ({ slide, wrapper: slide.firstElementChild, layer: slide.firstElementChild.firstElementChild,
+            transform: slide.firstElementChild.firstElementChild.style.transform }))
+        const changed = carousel.getSlideElement(1).firstElementChild
+        const input = carousel.getSlideElement(0).querySelector('input')
+        let inputs = 0
+        input.addEventListener('input', () => inputs++)
+        input.value = 'User editing'; input.focus(); input.setSelectionRange(2, 6)
+        const inspect = () => ({
+          preserved: untouched.every(({ slide, wrapper, layer, transform }) => slide.firstElementChild === wrapper
+            && wrapper.firstElementChild === layer && layer.style.transform === transform),
+          native: carousel.getSlideElement(0).querySelector('input') === input && document.activeElement === input
+            && input.value === 'User editing' && input.selectionStart === 2 && input.selectionEnd === 6,
+        })
+        carousel.updateSlide(1, { content: '<article style="height:160px">Replacement</article>' })
+        const updated = inspect()
+        const targetReplaced = carousel.getSlideElement(1).firstElementChild !== changed
+        carousel.refresh(1)
+        const refreshed = inspect()
+        input.dispatchEvent(new Event('input'))
+        carousel.refresh()
+        return { updated, refreshed, targetReplaced, inputs, visualCount: untouched.length,
+          fullReset: untouched.every(({ slide, wrapper }) => slide.firstElementChild !== wrapper),
+          nested: host.querySelectorAll('.carousel__parallax .carousel__parallax').length }
+      } finally { carousel.destroy(); host.remove() }
+    }, loop)
+    expect(result.updated).toEqual({ preserved: true, native: true })
+    expect(result.refreshed).toEqual({ preserved: true, native: true })
+    expect(result.targetReplaced).toBe(true)
+    expect(result.inputs).toBe(1)
+    expect(result.visualCount).toBeGreaterThanOrEqual(loop ? 2 : 1)
+    expect(result.fullReset).toBe(true)
+    expect(result.nested).toBe(0)
+  })
+}
+
+test('parallax unwrap cannot continue stale DOM moves after a custom element replaces content', async ({ page }) => {
+  const errors = []
+  page.on('pageerror', error => errors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error') errors.push(message.text()) })
+  const result = await page.evaluate(async () => {
+    const { Carousel, createParallax } = await import('/src/index.js')
+    let replace = null
+    customElements.define('parallax-reset-probe', class extends HTMLElement {
+      connectedCallback() { replace?.() }
+      connectedMoveCallback() { replace?.() }
+    })
+    const host = document.createElement('div')
+    host.style.width = '500px'
+    document.body.append(host)
+    const carousel = new Carousel(host, [
+      { content: '<parallax-reset-probe></parallax-reset-probe><input value="retired">' },
+      { content: '<article>Second</article>' },
+    ], { transitionDuration: 0, plugins: [createParallax()] })
+    try {
+      replace = () => {
+        replace = null
+        carousel.updateSlide(0, { content: '<article>New owner</article>' })
+      }
+      carousel.update({ gap: 12 })
+      return { text: carousel.getSlideElement(0).textContent,
+        staleInputs: host.querySelectorAll('input').length,
+        layers: host.querySelectorAll('.carousel__parallax__layer').length }
+    } finally { replace = null; carousel.destroy(); host.remove() }
+  })
+  expect(errors).toEqual([])
+  expect(result).toEqual({ text: 'New owner', staleInputs: 0, layers: 2 })
+})

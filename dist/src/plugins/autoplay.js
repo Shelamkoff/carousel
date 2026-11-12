@@ -44,7 +44,6 @@ export function createAutoplay(options = {}) {
   let autoNavigationStarted = false
   let lastIndex = 0
   let lastCount = 0
-  let transitionUnsub = null
   let pointerReleaseVersion = 0
   const heldPointers = new Set()
 
@@ -125,25 +124,8 @@ export function createAutoplay(options = {}) {
     publish()
   }
 
-  function stopWatchingTransition() {
-    const unsubscribe = transitionUnsub
-    transitionUnsub = null
-    unsubscribe?.()
-  }
-
   function syncTransition(owner) {
-    stopWatchingTransition()
     transitioning = owner.getRenderState()?.phase === 'animation'
-    if (transitioning) {
-      // A snapback has no transition:end. Watch the shared frame only until
-      // this motion settles; ordinary idle playback keeps its O(1) deadline.
-      transitionUnsub = owner.on('render', frame => {
-        if (!installed || ctx !== owner || frame.phase === 'animation') return
-        stopWatchingTransition()
-        transitioning = false
-        suspendOrResume()
-      })
-    }
   }
 
   function stop() {
@@ -164,6 +146,9 @@ export function createAutoplay(options = {}) {
     }
     const wasPaused = suspended()
     const wasRunning = timer !== null
+    // Explicit playback can follow a stopped pointer interaction or a custom
+    // gesture's cancellation, neither of which guarantees transition:end.
+    if (typeof ctx.getRenderState === 'function') syncTransition(ctx)
     if (explicit) {
       // A keyboard or pointer user must be able to press Play while the
       // control is focused/hovered. The next entry or focus move pauses again.
@@ -173,6 +158,7 @@ export function createAutoplay(options = {}) {
     const wasActive = active
     active = true
     const owner = ctx
+    if (suspended()) cancelTimer()
     schedule()
     if (!wasActive && active && installed && ctx === owner) owner.emit('autoplay:start')
     if (ctx === owner && (!wasActive || wasPaused !== suspended() || wasRunning !== (timer !== null))) publish()
@@ -244,11 +230,9 @@ export function createAutoplay(options = {}) {
         // The held pointer suspends playback while swipe may cancel motion.
         // Its actual outcome is reconciled after every release handler runs.
         transitioning = false
+        heldPointers.add(event.pointerId)
         if (pauseOnInteraction) stop()
-        else {
-          heldPointers.add(event.pointerId)
-          suspendOrResume()
-        }
+        else suspendOrResume()
       })
       const releasePointer = event => {
         if (!heldPointers.delete(event.pointerId)) return
@@ -269,7 +253,6 @@ export function createAutoplay(options = {}) {
 
       unsubs.push(
         context.on('slide:beforeChange', () => {
-          stopWatchingTransition()
           cancelTimer(false)
           remaining = interval
           transitioning = true
@@ -278,7 +261,6 @@ export function createAutoplay(options = {}) {
           publish()
         }),
         context.on('transition:end', () => {
-          stopWatchingTransition()
           cancelTimer(false)
           remaining = interval
           transitioning = false
@@ -287,8 +269,16 @@ export function createAutoplay(options = {}) {
           schedule()
           publish()
         }),
+        context.on('motion:idle', () => {
+          // Covers standalone cancellation and snap-back without subscribing
+          // to render frames. end/resize may already have reconciled this motion.
+          if (!transitioning) return
+          transitioning = false
+          lastIndex = context.getIndex()
+          lastCount = context.getSlideCount()
+          suspendOrResume()
+        }),
         context.on('resize', () => {
-          stopWatchingTransition()
           // Resizing/rebuilding may cancel the transition. A pure size change
           // preserves the countdown; changed content/index gets a new period.
           const reset = transitioning || context.getIndex() !== lastIndex
@@ -302,7 +292,6 @@ export function createAutoplay(options = {}) {
           publish()
         }),
       )
-      if (typeof context.getRenderState === 'function') syncTransition(context)
       start(false)
     },
 
@@ -313,7 +302,6 @@ export function createAutoplay(options = {}) {
       installed = false
       active = false
       ++pointerReleaseVersion
-      stopWatchingTransition()
       cancelTimer()
       const retiredUnsubs = unsubs
       const retiredRemovers = removers

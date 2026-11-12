@@ -1,4 +1,4 @@
-import { moveElement } from './dom.js'
+import { moveElement, disableCopyControl } from './dom.js'
 import { SlideContent } from './SlideContent.js'
 import { resolveLayoutSlots } from './layouts.js'
 import { writeSlideProgress } from './renderState.js'
@@ -172,13 +172,7 @@ export class TrackRenderer {
     for (const element of elements) {
       element.removeAttribute('id')
       element.removeAttribute('name')
-      if (['BUTTON', 'INPUT', 'SELECT', 'TEXTAREA', 'FIELDSET', 'OPTION', 'OPTGROUP'].includes(element.tagName)) {
-        element.disabled = true
-      } else if (element.constructor?.formAssociated === true) {
-        // Inert custom controls still participate in native form validation.
-        // Disable already-upgraded form-associated replicas before attachment.
-        element.setAttribute('disabled', '')
-      }
+      disableCopyControl(element)
       elements.push(...element.children)
     }
   }
@@ -597,9 +591,13 @@ export class TrackRenderer {
     // A stable ordering requires no DOM moves at all.
     const kept = new Set(next)
     if (!this.#content.releaseUnused(kept, () => this.#revision === revision)) return
-    for (let i = 0; i < next.length; i++) {
-      if (this.#track.children[i] !== next[i]) {
-        moveElement(this.#track, next[i], this.#track.children[i] ?? null)
+    // A DOM move invalidates indexed live-collection caches. Walk sibling
+    // links so large reorderings do not repeatedly rescan children from zero.
+    let anchor = this.#track.firstElementChild
+    for (const element of next) {
+      if (element === anchor) anchor = anchor.nextElementSibling
+      else {
+        moveElement(this.#track, element, anchor)
         if (this.#revision !== revision) return
       }
     }
@@ -653,6 +651,7 @@ export class TrackRenderer {
     this.#onLayoutError = null
     this.#onGeometryError = null
     this.#geometry = null
+    this.#layoutOptions = { layout: 'standard' }
     this.#lastSlots = null
     this.#copies = []
     this.#root = null

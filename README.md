@@ -122,6 +122,8 @@ carousel.addSlide({ id: 'clock', content: renderClock })
 
 Cleanup runs exactly once while the owned element is still attached, before replacement, explicit refresh, removal or carousel destruction. Moving a slide and keyed reconciliation with the same content reference retain its resource. Inert loop copies and transition snapshots do not create additional content owners or call the factory again. A factory-created root element may belong to only one active slide owner, including across carousels; create a fresh element for each factory call.
 
+Short-loop replicas are DOM clones. Their `inert` state prevents user interaction, but embedded documents, autoplay media and custom-element callbacks can still initialize in a clone. For content that must run as one browser instance, use finite navigation or a loop with enough original slides to cover the viewport without replicas. Surface transitions have a separate snapshot policy and replace embedded applications with decorative boxes.
+
 Factories and cleanup hooks are synchronous. Promise results are rejected through `slide:error`. If a factory synchronously changes the carousel before returning, its obsolete result is disposed without being attached. A factory that throws before returning its cleanup hook must release resources it already acquired.
 
 ## Configuration
@@ -461,7 +463,7 @@ Effect creation, rendering and cleanup must be synchronous. Creation or render f
 | `revision`, `reducedMotion` | Structural render revision and the current motion preference. |
 | `slides` | Ordered visual slots, including inert loop copies. Each exposes `element`, `index`, `copy`, `isCopy`, `offset`, `size`, `progress`, `focus` and `visible`. |
 
-`progress` is the signed distance from focus; `focus = max(0, 1 - abs(progress))`. `visible` is the intersecting fraction of the slot's size, not an occlusion or painted-pixel measurement. Use `isCopy` when attaching behavior: copies are decorative, and `getSlideElements()` returns originals only. Frozen snapshots do not freeze the referenced DOM elements. `render:reset` announces that structure or managed styles are about to be rebuilt; discard cached descendants then.
+`progress` is the signed distance from focus; `focus = max(0, 1 - abs(progress))`. `visible` is the intersecting fraction of the slot's size, not an occlusion or painted-pixel measurement. Use `isCopy` when attaching behavior: copies are decorative, and `getSlideElements()` returns originals only. Frozen snapshots do not freeze the referenced DOM elements. `render:reset` announces that structure or managed styles are about to be rebuilt; discard cached descendants then. Its optional `{ indices }` scope identifies retained logical slides whose content is changing, including their visual copies; no payload means a full reset. Plugins may always perform a full reset, while scoped cleanup avoids disturbing unrelated content. `createSlideEffect()` keeps its conservative full managed-style reset.
 
 Expand and custom layouts also expose `--carousel-slide-progress`, `--carousel-slide-focus` and the compatibility alias `--carousel-expand-focus` on their slide wrappers for CSS-driven content styling.
 
@@ -601,12 +603,13 @@ Reordering and reconciliation retain the selected identity when possible. Removi
 | --- | --- |
 | `slides:change` | `{ type, previousCount, count, index, updated?, fields? }`; `type` is `'add'`, `'remove'`, `'update'`, `'move'`, `'set'` or `'refresh'`. Point updates include the affected indices and supplied `'content'`, `'lazy'`, `'meta'` or `'thumb'` fields. |
 | `render` | `CarouselRenderState`; shared core frame for position-driven effects. |
-| `render:reset` | No payload; discard cached content/geometry before a rebuild. |
+| `render:reset` | Optional `{ indices: readonly number[] }` for retained point updates; no payload for a full rebuild. |
 | `geometry:error` / `layout:error` / `effect:error` | `{ name, error }`; failed physical measurement, visual layout or content effect. |
 | `slide:beforeChange` | `{ fromIndex, toIndex }` |
 | `slide:change` | `{ index, prevIndex, slide }` |
 | `transition:start` | `{ fromIndex, toIndex }` |
 | `transition:end` | `{ index }` |
+| `motion:idle` | `{ index, position, reason: 'complete' \| 'cancel' }`; settled navigation, snapback or cancellation. |
 | `transition:error` | `{ name, error }` |
 | `resize` | `{ slidesPerView }` |
 | `autoplay:start` / `autoplay:stop` | no payload |
@@ -616,6 +619,8 @@ Reordering and reconciliation retain the selected identity when possible. Removi
 | `destroy` | no payload |
 
 Rendering and lazy-load failures are isolated to the affected slide. After construction they are reported through `slide:error`. Initial synchronous render failures are logged to the console because a consumer cannot subscribe until the constructor returns.
+
+`motion:idle` is a lightweight lifecycle notification: subscribing does not create per-slide render snapshots. It is coalesced into a microtask after synchronous callbacks finish and is suppressed if replacement motion is still active or the carousel was destroyed. Completed navigation (including zero duration) and snapback report `'complete'`; cancelling animation or dragging reports `'cancel'` with the final rendered coordinate, without claiming that a destination was reached. Cancellation does not emit `transition:end` or `slide:change`. An already idle `stopAnimation()` is silent. Use this event to resume external work after gesture or animation cancellation; use `render` when each frame is required.
 
 ## Built-in plugins
 
@@ -676,11 +681,31 @@ Use `getNavigationGeometry()` for physical positions, `getNavigationTarget(1 | -
 
 If `install()` throws, the carousel rolls back context subscriptions and invokes the plugin cleanup. Make `destroy()` safe after partial installation.
 
+Plugin `install()` and `destroy()` must return synchronously. Promise/thenable results throw a `TypeError`; rejected results are consumed, installation is rolled back, and removal still revokes the context. Earlier versions did not check these return values and could leave a rejected asynchronous installation registered. Start asynchronous work inside a synchronous `install()`, handle its errors, and cancel it in synchronous `destroy()` (for example with `AbortController`). The carousel cannot cancel arbitrary asynchronous code that a plugin has already started.
+
 ## Verification
 
 Run `npm ci` for the locked development dependencies, then `npm run check` to execute the Node regression suite, check the public TypeScript API, and rebuild the ESM package and local demo dependency. GitHub Actions checks Node 20.19, 22 and 24, and rejects an out-of-date committed distribution. The committed `dist` also supports Git installs with lifecycle scripts disabled.
 
 Run `npx playwright install chromium` once, then `npm run test:browser` for Chromium integration tests of navigation, forms, same-origin iframes, live examples and lifecycle cleanup. To use an existing Chromium installation, set `PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH` to its executable. The diagnostic page is available at `/tests/browser/lifecycle.html` with `npm run demo`.
+
+## Performance and large collections
+
+The ordinary finite `standard` layout moves one track in O(1) JavaScript per frame when no `render` consumer requests per-slide state. It still mounts every slide wrapper and eager content. Loop positioning, custom geometry/layouts and effects that consume `frame.slides` process the whole visual collection; their frame cost grows with its size. A large DOM also has browser layout and memory costs even when navigation JavaScript is cheap.
+
+Use `updateSlide(index, patch)` for point changes. Metadata/thumbnail-only updates keep the fast path unless custom geometry depends on metadata. Use one keyed `setSlides(nextSlides)` for a group of collection changes, keeping stable IDs and unchanged content references to retain live nodes. Parallax uses scoped resets for point content replacement, refresh and lazy materialization. A full structural/layout reset still reconciles all of its wrappers. `createLazyLoad()` defers content and image loading while retaining wrappers and previously loaded content; it does not virtualize the DOM.
+
+Run the reproducible browser benchmark after installing the development dependencies and Chromium:
+
+```bash
+npm run benchmark -- --output performance-results.json
+# Shorter focused run or an existing Chromium installation:
+npm run benchmark -- --counts 100,1000 --scenarios finite_plain,finite_parallax --browser /path/to/chromium
+```
+
+The default matrix covers 10, 100, 1000 and 5000 cards in finite, loop, custom geometry/layout, focus and parallax modes. It records constructor time, the remaining layout flush, point updates, reverse reconciliation, native rAF render time/intervals, DOM counts, raw samples and environment metadata. Cards contain 19 elements and no network images. Each case uses a fresh sandboxed Chromium process. Run comparable checkouts serially on the same machine without other CPU-heavy work; `--repo` selects another checkout. `npm run benchmark -- --help` describes sampling and other options. Small-sample p95 is descriptive, and cloud/headless results do not define a universal slide limit or guarantee a display frame rate.
+
+DOM virtualization is not currently implemented. For an application with thousands of rich cards, assess both startup/DOM cost and per-frame work before choosing it. An opt-in virtual renderer would need an explicit mounted-range contract, overscan, geometry for unmounted slides, focus/transition pinning and content unmount/remount semantics. Existing DOM getters, full-frame effects and arbitrary custom layouts cannot silently become a visible subset. CSS rendering containment can reduce some browser work, but it does not remove DOM nodes or full-array JavaScript processing.
 
 ## Security boundary
 

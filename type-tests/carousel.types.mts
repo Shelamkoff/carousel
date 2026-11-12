@@ -57,6 +57,18 @@ carousel.on('slide:error', ({ error }) => {
   const problem: Error = error
   void problem
 })
+carousel.on('motion:idle', ({ index, position, reason }) => {
+  const selected: number = index
+  const coordinate: number = position
+  const outcome: 'complete' | 'cancel' = reason
+  void [selected, coordinate, outcome]
+})
+carousel.on('render:reset', scope => {
+  const indices: readonly number[] | undefined = scope?.indices
+  void indices
+  // @ts-expect-error Reset indices are immutable.
+  scope?.indices.push(1)
+})
 
 const plugin: CarouselPlugin = {
   name: 'example',

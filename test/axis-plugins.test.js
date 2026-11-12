@@ -142,6 +142,27 @@ test('vertical keyboard does not take arrows from shadow editors, shortcuts or c
   } finally { keyboard.destroy() }
 })
 
+for (const initial of [null, '-1', '4']) {
+  test(`keyboard restores the application's tabindex ${String(initial)} on removal and reuse`, () => {
+    const { context, viewport } = fixture()
+    if (initial !== null) viewport.setAttribute('tabindex', initial)
+    const keyboard = createKeyboard()
+    keyboard.install(context)
+    assert.equal(viewport.getAttribute('tabindex'), '0')
+    keyboard.destroy()
+    assert.equal(viewport.getAttribute('tabindex'), initial)
+
+    viewport.setAttribute('tabindex', '2')
+    keyboard.install(context)
+    viewport.setAttribute('tabindex', '7')
+    keyboard.destroy()
+    assert.equal(viewport.getAttribute('tabindex'), '7', 'later application writes retain ownership')
+    keyboard.install(context)
+    keyboard.destroy()
+    assert.equal(viewport.getAttribute('tabindex'), '7', 'reinstallation captures its own current baseline')
+  })
+}
+
 test('vertical swipe follows Y displacement and only captures after a main-axis drag', () => {
   const { context, viewport, state, pointer } = fixture()
   const swipe = createSwipe()
@@ -348,4 +369,61 @@ test('parallax wraps its own slide and never adopts or tears down a nested carou
   assert.equal(innerWrapper.firstChild, innerLayer)
   assert.equal(innerLayer.firstChild, content)
   assert.equal(innerLayer.style.transform, 'translateX(12%)')
+})
+
+test('parallax finds framework-replaced layers and ignores a stale cached class or parent', () => {
+  const { context, viewport } = fixture({ count: 1 })
+  const create = className => {
+    const element = viewport.ownerDocument.createElement('div')
+    element.className = className
+    return element
+  }
+  const slide = create('carousel__slide')
+  slide.appendChild(create('application-content'))
+  let progress = 1
+  context.getRenderState = () => ({ orientation: 'horizontal', reducedMotion: false,
+    slides: [{ element: slide, index: 0, isCopy: false, progress }],
+  })
+  const parallax = createParallax()
+  parallax.install(context)
+  try {
+    let wrapper = slide.firstChild
+    const first = wrapper.firstChild
+    assert.equal(first.style.transform, 'translateX(-20%)')
+    context.emit('resize')
+    assert.equal(wrapper.firstChild, first, 'stable frames retain their native layer')
+
+    first.remove()
+    const second = create('carousel__parallax__layer')
+    wrapper.appendChild(second)
+    progress = 2
+    context.emit('resize')
+    assert.equal(second.style.transform, 'translateX(-40%)')
+    assert.equal(first.style.transform, 'translateX(-20%)', 'detached layers receive no stale writes')
+
+    wrapper.remove()
+    wrapper = create('carousel__parallax')
+    const third = create('carousel__parallax__layer')
+    wrapper.appendChild(third)
+    slide.appendChild(wrapper)
+    progress = -1
+    context.emit('resize')
+    assert.equal(third.style.transform, 'translateX(20%)')
+
+    third.className = 'application-layer'
+    const fourth = create('carousel__parallax__layer')
+    wrapper.appendChild(fourth)
+    context.emit('resize')
+    assert.equal(fourth.style.transform, 'translateX(20%)')
+
+    wrapper.className = 'application-wrapper'
+    const replacement = create('carousel__parallax')
+    const fifth = create('carousel__parallax__layer')
+    replacement.appendChild(fifth)
+    slide.appendChild(replacement)
+    progress = 0
+    context.emit('resize')
+    assert.equal(fifth.style.transform, 'translateX(0%)')
+    assert.equal(fourth.style.transform, 'translateX(20%)', 'renamed wrappers are no longer render targets')
+  } finally { parallax.destroy() }
 })

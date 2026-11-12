@@ -10,6 +10,7 @@ export function createKeyboard(options = {}) {
   let handler = null
   let target = null
   let ownerDocument = null
+  let previousTabindex = null
 
   const scope = options.scope ?? 'container'
   if (scope !== 'container' && scope !== 'document') {
@@ -65,6 +66,7 @@ export function createKeyboard(options = {}) {
       if (scope === 'container') {
         target = context.getRoot()
         if (target) {
+          previousTabindex = target.getAttribute('tabindex')
           target.setAttribute('tabindex', '0')
         }
       } else {
@@ -79,8 +81,10 @@ export function createKeyboard(options = {}) {
         target.removeEventListener('keydown', handler)
       }
       if (scope === 'container' && target?.getAttribute('tabindex') === '0') {
-        target.removeAttribute('tabindex')
+        if (previousTabindex === null) target.removeAttribute('tabindex')
+        else target.setAttribute('tabindex', previousTabindex)
       }
+      previousTabindex = null
       target = null
       handler = null
       ownerDocument = null

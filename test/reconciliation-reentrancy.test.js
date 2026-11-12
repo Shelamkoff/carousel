@@ -7,6 +7,10 @@ class Element {
   dataset = {}
   children = []
   parentNode = null
+  get firstElementChild() { return this.children[0] ?? null }
+  get nextElementSibling() {
+    return this.parentNode?.children[this.parentNode.children.indexOf(this) + 1] ?? null
+  }
   classList = { add() {}, remove() {}, toggle() {} }
   setAttribute() {}
   get offsetWidth() { return 400 }

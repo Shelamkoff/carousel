@@ -97,6 +97,45 @@ test('installing autoplay during navigation starts a full interval after settlem
   expect(settled.remaining).toBeLessThanOrEqual(1000)
 })
 
+for (const settlement of ['cancellation', 'snapback']) {
+  test(`autoplay resumes after standalone plugin ${settlement} without a render subscriber`, async ({ page }) => {
+    await mount(page, { swipe: false, controls: { progress: false },
+      autoplay: { pauseOnHover: false, pauseOnFocus: false, pauseOnInteraction: false },
+      options: { transitionDuration: 600 },
+    })
+    await page.evaluate(() => {
+      const fixture = window.controlsFixture
+      fixture.idleEvents = []
+      fixture.carousel.use({ name: 'custom-gesture', install(context) {
+        fixture.gesture = context
+        context.on('motion:idle', event => fixture.idleEvents.push(event.reason))
+      } })
+      fixture.carousel.next()
+    })
+    await page.clock.runFor(100)
+    expect(await readState(page)).toMatchObject({ active: true, paused: true, running: false, remaining: 1000 })
+    await page.evaluate(settlement => {
+      const { gesture } = window.controlsFixture
+      gesture.stopAnimation()
+      if (settlement === 'snapback') gesture.snapBack(0)
+    }, settlement)
+    if (settlement === 'snapback') {
+      expect(await page.evaluate(() => window.controlsFixture.carousel.getRenderState().phase)).toBe('animation')
+      expect(await readState(page)).toMatchObject({ paused: true, running: false, remaining: 1000 })
+      // Leave room for the first animation frame after the 600ms duration.
+      await page.clock.runFor(640)
+    }
+    expect(await page.evaluate(() => window.controlsFixture.carousel.getRenderState().phase)).toBe('idle')
+    expect(await readState(page)).toMatchObject({ active: true, paused: false, running: true })
+    const remaining = (await readState(page)).remaining
+    expect(remaining).toBeGreaterThan(950)
+    expect(remaining).toBeLessThanOrEqual(1000)
+    expect(await page.evaluate(() => window.controlsFixture.idleEvents)).toEqual([
+      settlement === 'cancellation' ? 'cancel' : 'complete',
+    ])
+  })
+}
+
 test('autoplay circle freezes on hover and resumes the same remaining display time', async ({ page }) => {
   await mount(page)
   const progress = page.getByRole('progressbar', { name: 'Time elapsed on this slide' })

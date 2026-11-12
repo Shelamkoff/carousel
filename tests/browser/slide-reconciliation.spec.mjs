@@ -62,3 +62,41 @@ test('a connected callback that replaces the collection retires newly inserted s
   })
   expect(result).toEqual({ ids: ['latest'], children: ['Latest collection'], tracked: true })
 })
+
+test('a large reverse moves each retained wrapper once and preserves focused native state', async ({ page }) => {
+  const result = await page.evaluate(async () => {
+    const { Carousel } = await import('/src/index.js')
+    const host = document.createElement('div')
+    host.style.width = '400px'
+    document.body.append(host)
+    const count = 128
+    const selectedIndex = Math.floor(count / 2)
+    const slides = Array.from({ length: count }, (_, id) => ({ id, content: () => document.createElement('input') }))
+    const carousel = new Carousel(host, slides, { transitionDuration: 0, startIndex: selectedIndex })
+    try {
+      const originals = carousel.getSlideElements()
+      const track = host.querySelector('.carousel__track')
+      const input = originals[selectedIndex].firstElementChild
+      input.value = 'Retained user input'
+      input.focus()
+      input.setSelectionRange(2, 6, 'backward')
+      const move = typeof track.moveBefore === 'function' ? 'moveBefore' : 'insertBefore'
+      const nativeMove = track[move]
+      let moves = 0
+      track[move] = function (...args) { moves++; return nativeMove.apply(this, args) }
+      const reversed = [...slides].reverse()
+      carousel.setSlides(reversed)
+      const reverseMoves = moves
+      moves = 0
+      carousel.setSlides(reversed)
+      return { reverseMoves, stableMoves: moves,
+        retained: carousel.getSlideElements().every((element, index) => element === originals[count - 1 - index]),
+        order: [...track.children].every((element, index) => element === originals[count - 1 - index]),
+        selected: carousel.getSlideElement() === originals[selectedIndex],
+        focused: document.activeElement === input, value: input.value,
+        selection: [input.selectionStart, input.selectionEnd, input.selectionDirection] }
+    } finally { carousel.destroy(); host.remove() }
+  })
+  expect(result).toEqual({ reverseMoves: 127, stableMoves: 0, retained: true, order: true,
+    selected: true, focused: true, value: 'Retained user input', selection: [2, 6, 'backward'] })
+})

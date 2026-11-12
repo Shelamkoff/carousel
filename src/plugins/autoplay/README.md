@@ -25,6 +25,8 @@ A hidden document always suspends playback. Multiple held pointers keep it suspe
 
 Navigation resets display time after the transition finishes. A pure resize preserves time; a changed slide collection or cancelled transition starts a fresh interval. The plugin stops at the final finite page, with at most one source slide, or when a loop's scroll step cannot change the selected slide. `start()` then stays inactive until navigation is possible. The controls button is disabled in that state; navigate backward or change the collection before restarting.
 
+Explicit `start()` reads the current motion state: it waits for an active animation and can resume after a gesture plugin has cancelled one. Standalone `stopAnimation()` cancellation and snap-back completion resume through `motion:idle`, without a per-frame render subscription. Starting a new motion in the same synchronous operation suppresses the intermediate idle notification, so the countdown waits for the final motion to settle.
+
 | Method | Result |
 | --- | --- |
 | `start()` | Request playback; resume remaining time. |

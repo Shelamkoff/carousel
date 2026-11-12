@@ -19,7 +19,7 @@ export class StyleLedger {
     let entry = map.get(name)
     const current = read(element, name)
     if (!entry) {
-      entry = { initial: current, applied: current, owners: new Map() }
+      entry = { initial: current, applied: current, owners: new Map(), topOwner: null }
       map.set(name, entry)
     } else if (!equal(current, entry.applied)) {
       // Application writes made while an effect is active become the new
@@ -28,8 +28,11 @@ export class StyleLedger {
     }
     if (!this.#owned.has(element)) this.#owned.set(element, new Set())
     this.#owned.get(element).add(name)
+    // Existing owners keep their insertion priority when rendering again.
+    // Cache the last owner so every frame avoids copying the owner map.
+    if (!entry.owners.has(this)) entry.topOwner = this
     entry.owners.set(this, { value: value ?? '', priority: '' })
-    const last = [...entry.owners.values()].at(-1)
+    const last = entry.owners.get(entry.topOwner)
     if (!equal(current, last)) write(element, name, last)
     entry.applied = read(element, name)
   }
@@ -41,9 +44,13 @@ export class StyleLedger {
     const map = properties.get(element)
     const entry = map?.get(name)
     if (!entry || !entry.owners.delete(this)) return
+    if (entry.topOwner === this) {
+      entry.topOwner = null
+      for (const owner of entry.owners.keys()) entry.topOwner = owner
+    }
     const current = read(element, name)
     if (equal(current, entry.applied)) {
-      const next = [...entry.owners.values()].at(-1) ?? entry.initial
+      const next = entry.owners.get(entry.topOwner) ?? entry.initial
       if (!equal(current, next)) write(element, name, next)
     } else {
       entry.initial = current
