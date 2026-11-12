@@ -98,6 +98,14 @@ export interface CarouselOptions {
   slidesPerView?: number
   slidesPerScroll?: number | 'auto'
   orientation?: 'horizontal' | 'vertical'
+  /** 'expand' grows the active card and animates neighboring previews. */
+  layout?: 'standard' | 'expand'
+  /** Number of compact-card equivalents visible in expand mode. Default 2.5. */
+  expandVisible?: number
+  /** Active card size / compact card size. Default 2.5. */
+  expandRatio?: number
+  /** Leading peek area in CSS pixels; capped at 25% of viewport. Default 32. */
+  expandPeek?: number
   /** Vertical viewport height in CSS pixels. Omit to use --carousel-vertical-height. */
   viewportHeight?: number
   gap?: number

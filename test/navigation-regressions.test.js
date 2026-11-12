@@ -1875,3 +1875,36 @@ for (const action of ['goTo current', 'goTo another', 'next', 'update']) {
     }
   })
 }
+
+test('expanding layout keeps one logical slide active and preserves standard mode on update', () => {
+  const { carousel, host, track } = mount(900, 6, {
+    layout: 'expand', expandVisible: 2.5, expandRatio: 2.5, expandPeek: 32,
+    loop: true, gap: 18, transitionDuration: 0,
+  })
+  assert.equal(host.firstChild.classList.contains('carousel--expand'), true)
+  assert.equal(carousel.getIndex(), 0)
+  assert.ok(parseFloat(track.children[0].style.width) > parseFloat(track.children[1].style.width))
+  assert.equal(track.children[0].style['--carousel-expand-focus'], '1')
+  carousel.next()
+  assert.equal(carousel.getIndex(), 1)
+  assert.equal(track.children[1].style['--carousel-expand-focus'], '1')
+  carousel.update({ layout: 'standard' })
+  assert.equal(host.firstChild.classList.contains('carousel--expand'), false)
+  assert.equal(parseFloat(track.children[0].style.width), 900)
+  carousel.destroy()
+})
+
+test('expanding layout rejects incompatible options before creating DOM', () => {
+  for (const options of [
+    { layout: 'expand', slidesPerView: 2 },
+    { layout: 'expand', transition: 'fade' },
+    { layout: 'expand', expandVisible: .5 },
+    { layout: 'expand', expandRatio: .5 },
+    { layout: 'expand', expandPeek: -1 },
+    { layout: 'nonexistent' },
+  ]) {
+    const host = new Element()
+    assert.throws(() => new Carousel(host, [{ content: 'one' }], options))
+    assert.equal(host.children.length, 0)
+  }
+})

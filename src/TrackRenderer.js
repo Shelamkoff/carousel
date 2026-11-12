@@ -1,4 +1,5 @@
 import { isHTMLElement } from './dom.js'
+import { getExpandGeometry, getExpandSlot, getExpandVirtualIndex } from './expand.js'
 
 /**
  * DOM construction and positioning.
@@ -37,6 +38,7 @@ export class TrackRenderer {
   /** @type {boolean} */
   #isLoop = false
   #vertical = false
+  #expanding = false
   /** @type {((index: number, error: Error) => void) | null} */
   #onRenderError = null
   #document = null
@@ -282,7 +284,9 @@ export class TrackRenderer {
   /** Keep orientation and viewport sizing together during atomic rebuilds. */
   #configureOrientation(layout) {
     this.#vertical = layout.orientation === 'vertical'
+    this.#expanding = layout.layout === 'expand'
     this.#root?.classList.toggle('carousel--vertical', this.#vertical)
+    this.#root?.classList.toggle('carousel--expand', this.#expanding)
     if (this.#viewport) {
       this.#viewport.style.height = this.#vertical && layout.viewportHeight !== undefined
         ? layout.viewportHeight + 'px' : ''
@@ -302,7 +306,7 @@ export class TrackRenderer {
     this.#gap = gap
     this.#root?.style.setProperty('--carousel-gap', gap + 'px')
     // Non-loop: flex gap for spacing. Loop: gap handled by LoopEngine step.
-    this.#track.style.gap = this.#isLoop ? '' : gap + 'px'
+    this.#track.style.gap = this.#isLoop || this.#expanding ? '' : gap + 'px'
     this.#recalcSlideSize()
   }
 
@@ -323,8 +327,8 @@ export class TrackRenderer {
       el.style.flexShrink = '0'
       el.style.flexGrow = '0'
 
-      if (this.#isLoop) {
-        // Loop: absolute positioning, LoopEngine controls transform
+      if (this.#isLoop || this.#expanding) {
+        // Loop/expanding layouts position cards individually
         el.style.position = 'absolute'
         el.style.top = '0'
         el.style.left = '0'
@@ -334,6 +338,7 @@ export class TrackRenderer {
         el.style.top = ''
         el.style.left = ''
         el.style.transform = ''
+        el.style.removeProperty?.('--carousel-expand-focus')
       }
     }
 
@@ -346,7 +351,7 @@ export class TrackRenderer {
       this.#track.style.height = this.#lastViewportSize + 'px'
       return
     }
-    if (!this.#isLoop) return
+    if (!this.#isLoop && !this.#expanding) return
     // Set track height from tallest slide (absolute positioning removes from flow)
     // Use scrollHeight as fallback since offsetHeight may be 0 before content renders
     let maxH = 0
@@ -359,7 +364,7 @@ export class TrackRenderer {
 
   /** Recalculate dimensions after a plugin renders or changes slide content. */
   refreshLayout() {
-    if (this.#isLoop || this.#vertical) this.#updateTrackHeight()
+    if (this.#isLoop || this.#vertical || this.#expanding) this.#updateTrackHeight()
   }
 
   /** @returns {number} */
@@ -381,6 +386,42 @@ export class TrackRenderer {
     this.#track.style.transition = 'none'
     this.#track.style.transform = this.#vertical
       ? `translate3d(0, ${offset}px, 0)` : `translate3d(${offset}px, 0, 0)`
+  }
+
+  /**
+   * Expanding cards use the same logical position/clock as ordinary navigation.
+   * Only adjacent cards grow; other cards retain a stable, smaller width.
+   * The track stays stationary and the originals retain their DOM identity.
+   *
+   * @param {number} position Logical fractional slide index.
+   * @param {number} ratio Expanded width relative to a compact card.
+   * @param {number} peek Free space at the leading edge in CSS pixels.
+   */
+  renderExpand(position, ratio, peek) {
+    if (!this.#viewport || !this.#track) return
+    const count = this.#slideElements.length
+    const geometry = getExpandGeometry(
+      position, this.#lastViewportSize, this.#slidesPerView, ratio, peek, this.#gap, count, this.#isLoop,
+    )
+    if (this.#track.style.transform !== 'none') this.#track.style.transform = 'none'
+    for (const el of this.getPositionElements()) {
+      const logical = Number(el.dataset.index)
+      const copy = Number(el.dataset.carouselCopy ?? 0)
+      const virtual = this.#isLoop ? getExpandVirtualIndex(logical, position, count, copy) : logical
+      const { offset, size, focus } = getExpandSlot(geometry, virtual)
+      if (this.#vertical) {
+        el.style.height = size + 'px'
+        el.style.minHeight = size + 'px'
+      } else {
+        el.style.width = size + 'px'
+        el.style.minWidth = size + 'px'
+      }
+      el.style.flexBasis = size + 'px'
+      el.style.transform = this.#vertical
+        ? `translate3d(0, ${offset}px, 0)`
+        : `translate3d(${offset}px, 0, 0)`
+      el.style.setProperty('--carousel-expand-focus', String(focus))
+    }
   }
 
   // Track animations are owned by Carousel's position controller.

@@ -13,6 +13,10 @@ const ownedPluginInstances = new WeakSet()
 const DEFAULTS = {
   slidesPerView: 1,
   orientation: 'horizontal',
+  layout: 'standard',
+  expandVisible: 2.5,
+  expandRatio: 2.5,
+  expandPeek: 32,
   slidesPerScroll: 1,
   gap: 0,
   transition: 'slide',
@@ -23,6 +27,24 @@ const DEFAULTS = {
 }
 
 function validateResolvedOptions(options) {
+  if (options.layout !== 'standard' && options.layout !== 'expand') {
+    throw new TypeError('Carousel: layout must be "standard" or "expand"')
+  }
+  if (!Number.isFinite(options.expandVisible) || options.expandVisible < 1) {
+    throw new RangeError('Carousel: expandVisible must be a finite number >= 1')
+  }
+  if (!Number.isFinite(options.expandRatio) || options.expandRatio < 1) {
+    throw new RangeError('Carousel: expandRatio must be a finite number >= 1')
+  }
+  if (!Number.isFinite(options.expandPeek) || options.expandPeek < 0) {
+    throw new RangeError('Carousel: expandPeek must be a non-negative finite number')
+  }
+  if (options.layout === 'expand' && options.slidesPerView !== 1) {
+    throw new RangeError('Carousel: expand layout has one active slide; use expandVisible for neighboring previews')
+  }
+  if (options.layout === 'expand' && options.transition === 'fade') {
+    throw new TypeError('Carousel: fade is incompatible with expanding layout')
+  }
   if (options.orientation !== 'horizontal' && options.orientation !== 'vertical') {
     throw new TypeError('Carousel: orientation must be "horizontal" or "vertical"')
   }
@@ -201,16 +223,24 @@ export class Carousel {
 
   /* ═══════════════ DOM ═══════════════ */
 
-  #buildDOM() {
+  #trackLayout() {
     const opts = this.#resolvedOptions
-    this.#trackRenderer.build(this.#container, this.#slideManager.getSlides(), {
-      slidesPerView: opts.slidesPerView ?? 1,
+    return {
+      slidesPerView: opts.layout === 'expand' ? opts.expandVisible : opts.slidesPerView ?? 1,
       gap: opts.gap ?? 0,
       loop: opts.loop ?? false,
       ariaLabel: opts.ariaLabel,
       orientation: opts.orientation,
       viewportHeight: opts.viewportHeight,
-    })
+      layout: opts.layout,
+      expandRatio: opts.expandRatio,
+      expandPeek: opts.expandPeek,
+    }
+  }
+
+  #buildDOM() {
+    const opts = this.#resolvedOptions
+    this.#trackRenderer.build(this.#container, this.#slideManager.getSlides(), this.#trackLayout())
     this.#initLoop()
     const count = this.#slideManager.getSlideCount()
     const startIndex = opts.startIndex ?? 0
@@ -361,6 +391,18 @@ export class Carousel {
    * Non-loop: track moves, slides stay in flex flow.
    */
   #render(clamp = true) {
+    if (this.#resolvedOptions.layout === 'expand') {
+      const step = this.#step()
+      if (!this.#loop && clamp) {
+        const lastPosition = Math.max(0, this.#slideManager.getSlideCount() - 1) * step
+        this.#position = Math.max(0, Math.min(this.#position, lastPosition))
+      }
+      this.#trackRenderer.renderExpand(
+        step > 0 ? this.#position / step : this.#selectedIndex,
+        this.#resolvedOptions.expandRatio, this.#resolvedOptions.expandPeek,
+      )
+      return
+    }
     if (this.#loop) {
       this.#loop.positionSlides(
         this.#trackRenderer.getPositionElements(),
@@ -390,14 +432,7 @@ export class Carousel {
     this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
     const opts = this.#resolvedOptions
     this.#dispatchEvents(() => {
-      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
-        slidesPerView: opts.slidesPerView ?? 1,
-        gap: opts.gap ?? 0,
-        loop: opts.loop ?? false,
-        ariaLabel: opts.ariaLabel,
-        orientation: opts.orientation,
-        viewportHeight: opts.viewportHeight,
-      })
+      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout())
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()
       this.#position = oldIdx * this.#step()
@@ -1092,14 +1127,7 @@ export class Carousel {
     this.#pendingResizeStep = null
     const opts = this.#resolvedOptions
     this.#dispatchEvents(() => {
-      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), {
-        slidesPerView: opts.slidesPerView ?? 1,
-        gap: opts.gap ?? 0,
-        loop: opts.loop ?? false,
-        ariaLabel: opts.ariaLabel,
-        orientation: opts.orientation,
-        viewportHeight: opts.viewportHeight,
-      }, refreshContent)
+      this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout(), refreshContent)
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#initLoop()
       const idx = Math.min(index, this.#slideManager.getSlideCount() - 1)
