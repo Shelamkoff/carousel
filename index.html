@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>@shelamkoff/carousel — Live Demo</title>
-  <meta name="description" content="Interactive horizontal and vertical carousels with fractional slides, themed playback controls, progress, transitions, swipe and thumbnails.">
+  <meta name="description" content="Interactive horizontal and vertical carousels with continuous gallery scrolling, fractional slides, themed playback controls, transitions, swipe and thumbnails.">
   <link rel="canonical" href="https://shelamkoff.github.io/carousel/">
   <link rel="stylesheet" href="styles/carousel.css">
   <style>
@@ -197,6 +197,12 @@
     .gallery-options { margin-top: 16px; font-size: .875rem; }
     .gallery-options summary { cursor: pointer; }
     .gallery-options pre { overflow: auto; padding: 16px; margin-top: 12px; background: #fff; border: 1px solid #c8d1df; border-radius: 6px; line-height: 1.6; }
+    #demo-continuous .gallery-card img { height: 220px; }
+    #demo-continuous .carousel--vertical .gallery-card { flex-direction: row; }
+    #demo-continuous .carousel--vertical .gallery-card img { width: 58%; height: 100%; flex: 0 0 58%; }
+    #demo-continuous .carousel--vertical .gallery-card figcaption { align-self: center; }
+    .continuous-settings button { padding: 8px 14px; border: 1px solid #a8b4c7; border-radius: 4px; background: #fff; color: #243248; font: inherit; cursor: pointer; }
+    .continuous-settings button:hover { background: #e8eef8; }
     .demo-note { color: #555; line-height: 1.5; margin-bottom: 16px; max-width: 65ch; }
     .demo-status { display: block; margin-top: 12px; color: #444; font-size: .875rem; line-height: 1.5; }
     .height-host { width: 100%; transition: width .25s ease; }
@@ -383,6 +389,7 @@
       <a href="#basic-example">Navigation</a>
       <a href="#gallery-example">Vertical &amp; fractional</a>
       <a href="#autoplay-example">Playback controls</a>
+      <a href="#continuous-example">Continuous scrolling</a>
       <a href="#transitions-example">Transitions</a>
       <a href="#expand-example">Expanding cards</a>
       <a href="#theming-example">Themes</a>
@@ -592,6 +599,27 @@
     <p class="demo-note">The navigation and caption motion share one timeline; Play/Pause, elapsed time, keyboard control and short loop replicas remain available.</p>
   </section>
 
+  <section class="demo-section" id="continuous-example">
+    <h2>19. Continuous gallery scrolling</h2>
+    <p class="demo-note">Let the gallery glide at a constant speed. Choose its direction or pause it to explore a card. Hover, keyboard focus and dragging pause the movement.</p>
+    <div class="gallery-settings continuous-settings" role="group" aria-label="Continuous scrolling settings">
+      <label><span id="continuous-direction-label">Movement direction</span>
+        <select id="continuous-direction" aria-labelledby="continuous-direction-label"><option value="left">Left</option><option value="right">Right</option><option value="up">Up</option><option value="down">Down</option></select>
+      </label>
+      <label><span id="continuous-speed-label">Scroll speed</span>
+        <select id="continuous-speed" aria-labelledby="continuous-speed-label"><option value="20">20 px/s</option><option value="40" selected>40 px/s</option><option value="80">80 px/s</option></select>
+      </label>
+      <button type="button" id="continuous-toggle">Pause scrolling</button>
+    </div>
+    <div id="demo-continuous" class="theme-preview" data-theme="light"></div>
+    <output id="continuous-status" class="demo-status" aria-live="polite"></output>
+    <p id="continuous-motion-note" class="demo-note" hidden>Automatic movement is paused because your device requests reduced motion.</p>
+    <details class="gallery-options">
+      <summary>Current options</summary>
+      <pre><code id="continuous-options-code"></code></pre>
+    </details>
+  </section>
+
   <script type="importmap">
     {
       "imports": {
@@ -607,6 +635,7 @@
       createKeyboard,
       createSwipe,
       createAutoplay,
+      createAutoScroll,
       createControls,
       createThumbnails,
       createParallax,
@@ -1245,6 +1274,72 @@
       }
     })
     updateExpandStatus()
+
+    // ── Demo 19: continuous, position-driven gallery movement ──
+    const continuousInputs = {
+      direction: document.getElementById('continuous-direction'),
+      speed: document.getElementById('continuous-speed'),
+      toggle: document.getElementById('continuous-toggle'),
+    }
+    const continuousDirections = {
+      left: { orientation: 'horizontal', direction: 'forward' },
+      right: { orientation: 'horizontal', direction: 'backward' },
+      up: { orientation: 'vertical', direction: 'forward' },
+      down: { orientation: 'vertical', direction: 'backward' },
+    }
+    const autoScroll = createAutoScroll({ speed: 40 })
+    let continuousOrientation = 'horizontal'
+    const continuous = new Carousel('#demo-continuous', gallerySlides, {
+      slidesPerView: 1.25,
+      breakpoints: { 620: { slidesPerView: 2.25 } },
+      viewportHeight: 360,
+      gap: 16,
+      loop: true,
+      ariaLabel: 'Continuously scrolling gallery',
+      plugins: [
+        createArrows(), createKeyboard(), createSwipe({ mouse: true }), autoScroll,
+      ],
+    })
+    function updateContinuousStatus() {
+      const state = autoScroll.getState()
+      const direction = continuousInputs.direction.value
+      const status = state.reducedMotion ? 'Paused for reduced motion'
+        : state.running ? `Moving ${direction}` : 'Paused'
+      document.getElementById('continuous-status').textContent = `${status} · ${state.speed} px/s`
+      continuousInputs.toggle.textContent = state.active ? 'Pause scrolling' : 'Resume scrolling'
+      continuousInputs.toggle.disabled = state.reducedMotion
+      document.getElementById('continuous-motion-note').hidden = !state.reducedMotion
+    }
+    function updateContinuousSettings() {
+      const movement = continuousDirections[continuousInputs.direction.value]
+      if (movement.orientation !== continuousOrientation) {
+        continuous.update({ orientation: movement.orientation })
+        continuousOrientation = movement.orientation
+      }
+      autoScroll.update({ speed: Number(continuousInputs.speed.value), direction: movement.direction })
+      document.getElementById('continuous-options-code').textContent = `const autoScroll = createAutoScroll({
+  speed: ${continuousInputs.speed.value}, // pixels per second
+  direction: '${movement.direction}',
+  pauseOnHover: true, pauseOnFocus: true,
+  respectReducedMotion: true,
+})
+new Carousel(host, slides, {
+  orientation: '${movement.orientation}', viewportHeight: 360,
+  slidesPerView: 1.25, breakpoints: { 620: { slidesPerView: 2.25 } },
+  gap: 16, loop: true,
+  plugins: [createArrows(), createKeyboard(), createSwipe({ mouse: true }), autoScroll],
+})
+// autoScroll.stop(); autoScroll.start()
+// autoScroll.update({ speed: 80, direction: 'backward' })`
+      // Layout updates yield the clock until the controller's queued resume.
+      // Read the settled state instead of displaying that transient pause.
+      queueMicrotask(updateContinuousStatus)
+    }
+    continuous.on('autoscroll:state', updateContinuousStatus)
+    continuousInputs.toggle.addEventListener('click', () => autoScroll.toggle())
+    continuousInputs.direction.addEventListener('change', updateContinuousSettings)
+    continuousInputs.speed.addEventListener('change', updateContinuousSettings)
+    updateContinuousSettings()
 
     document.body.dataset.status = 'pass'
   </script>

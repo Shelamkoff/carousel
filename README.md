@@ -12,7 +12,7 @@ Framework-agnostic, position-based carousel and slider with responsive layouts, 
 
 - Responsive single- and multi-slide layouts with fixed or automatic scroll steps.
 - Loop mode, 14 built-in transitions, custom effects, keyboard control, touch and mouse gestures.
-- Arrows, dots, thumbnails, autoplay, lazy loading, swipe, and parallax plugins.
+- Arrows, dots, thumbnails, autoplay, continuous scrolling, lazy loading, swipe, and parallax plugins.
 - Framework-independent lifecycle, typed events, and TypeScript declarations.
 - Keyed slide updates, reordering and collection replacement that preserve unchanged content.
 - Physical navigation geometry for variable slide sizes, independent visual layouts, and content effects on the shared render timeline.
@@ -122,7 +122,7 @@ carousel.addSlide({ id: 'clock', content: renderClock })
 
 Cleanup runs exactly once while the owned element is still attached, before replacement, explicit refresh, removal or carousel destruction. Moving a slide and keyed reconciliation with the same content reference retain its resource. Inert loop copies and transition snapshots do not create additional content owners or call the factory again. A factory-created root element may belong to only one active slide owner, including across carousels; create a fresh element for each factory call.
 
-Short-loop replicas are DOM clones. Their `inert` state prevents user interaction, but embedded documents, autoplay media and custom-element callbacks can still initialize in a clone. For content that must run as one browser instance, use finite navigation or a loop with enough original slides to cover the viewport without replicas. Surface transitions have a separate snapshot policy and replace embedded applications with decorative boxes.
+Short-loop replicas and surface transitions use inert decorative snapshots. Snapshot construction does not instantiate custom elements or embedded documents: custom elements become ordinary styled elements with safe light-DOM content, customized built-ins lose their `is` attribute, and iframe/object/embed/script content becomes decorative boxes. Video/audio do not play in a snapshot; ordinary form state, canvas pixels and images are copied, and local IDs/references are namespaced. Shadow DOM and pixels inside an embedded application cannot be reproduced. Snapshots refresh through the existing slide render/refresh/rebuild lifecycle; they do not mirror arbitrary application mutations continuously. The original retains the single live browser/application instance. Use finite navigation or enough loop originals when every visible representation must remain a live interactive application.
 
 Factories and cleanup hooks are synchronous. Promise results are rejected through `slide:error`. If a factory synchronously changes the carousel before returning, its obsolete result is disposed without being attached. A factory that throws before returning its cleanup hook must release resources it already acquired.
 
@@ -235,6 +235,32 @@ controls.update({ progress: 'bar', counter: false })
 Each visibility option is independent and can be updated without remounting the carousel. Progress uses the autoplay deadline: pause freezes it, Play resumes the remaining time, and the next slide gets a full display interval after its transition. Hover, keyboard focus and hidden tabs suspend playback. Explicit Play can resume while its button is hovered/focused; moving focus into another control pauses again. `pauseOnInteraction` defaults to `true`; use `false` to continue after manual navigation. See [Autoplay](src/plugins/autoplay/README.md) and [Controls](src/plugins/controls/README.md) for the API and localization options.
 
 The counter displays the selected logical slide and total source count, for example `1 / 7`, or `0 / 0` for an empty carousel. Visual copies are excluded. In a finite multi-slide layout the final selection can be `6 / 7` because slide 7 is already visible beside slide 6. It is a slide counter, not a page count. `formatCounter(current, total)` customizes its text safely.
+
+### Continuous gallery scrolling
+
+`createAutoScroll()` moves slides at a constant speed in pixels per second. It uses the carousel's position and animation clock, so layouts and slide effects follow the movement. There is no display interval or snap after each slide.
+
+```js
+import { Carousel, createAutoScroll, createSwipe } from '@shelamkoff/carousel'
+
+const scroll = createAutoScroll({ speed: 40, direction: 'forward' })
+const gallery = new Carousel('#gallery', slides, {
+  slidesPerView: 2.25,
+  gap: 16,
+  loop: true,
+  plugins: [createSwipe({ mouse: true }), scroll],
+})
+
+scroll.stop() // Keep the current position.
+scroll.start()
+scroll.update({ speed: 80, direction: 'backward' })
+```
+
+`forward` moves the gallery left in horizontal mode and up in vertical mode; `backward` moves it right/down. A loop moves continuously across its boundary. Finite navigation stops at the edge without wrapping; reversing direction resumes requested scrolling. Hover, focus, held pointers, a hidden tab and an active navigation transition suspend movement. After a gesture or navigation it resumes by default; `pauseOnInteraction: true` requires an explicit restart. Reduced-motion preferences pause scrolling by default, including explicit `start()` calls.
+
+Use `getState()` and `autoscroll:state` to build a pause/resume button. The built-in `createControls()` time progress belongs to interval autoplay. `createAutoplay()` and `createAutoScroll()` cannot be installed together on one carousel. See [Auto scroll](src/plugins/autoScroll/README.md) for all options, lifecycle rules and the motion API.
+
+[Try continuous scrolling in all four directions](https://shelamkoff.github.io/carousel/#continuous-example).
 
 ## Transitions
 
@@ -459,7 +485,7 @@ Effect creation, rendering and cleanup must be synchronous. Creation or render f
 | --- | --- |
 | `position`, `step`, `viewportSize`, `orientation` | Physical position, canonical uniform fallback step, viewport main-axis size and axis. |
 | `index`, `selectedIndex`, `fromIndex` | Current logical position index, selected destination, and transition origin. |
-| `phase`, `direction`, `transitionProgress` | `'idle'`, `'drag'` or `'animation'`; direction `-1`, `0` or `1`; linear progress `0…1`, or `null` outside animation. |
+| `phase`, `direction`, `transitionProgress` | `'idle'`, `'drag'`, `'animation'` or `'scroll'`; direction `-1`, `0` or `1`; linear progress `0…1`, or `null` outside a bounded animation. |
 | `revision`, `reducedMotion` | Structural render revision and the current motion preference. |
 | `slides` | Ordered visual slots, including inert loop copies. Each exposes `element`, `index`, `copy`, `isCopy`, `offset`, `size`, `progress`, `focus` and `visible`. |
 
@@ -609,18 +635,19 @@ Reordering and reconciliation retain the selected identity when possible. Removi
 | `slide:change` | `{ index, prevIndex, slide }` |
 | `transition:start` | `{ fromIndex, toIndex }` |
 | `transition:end` | `{ index }` |
-| `motion:idle` | `{ index, position, reason: 'complete' \| 'cancel' }`; settled navigation, snapback or cancellation. |
+| `motion:idle` | `{ index, position, reason: 'complete' \| 'cancel' }`; settled navigation, snapback, continuous-scroll boundary or cancellation. |
 | `transition:error` | `{ name, error }` |
 | `resize` | `{ slidesPerView }` |
 | `autoplay:start` / `autoplay:stop` | no payload |
 | `autoplay:state` | `{ available, active, paused, running, interval, remaining, progress }`; emitted on state changes, not every frame. |
+| `autoscroll:state` | `{ available, active, paused, running, speed, direction, reducedMotion }`; continuous-scroll state changes, not every frame. |
 | `slide:lazyload` | `{ index, element }` |
 | `slide:error` | `{ index, error }` |
 | `destroy` | no payload |
 
 Rendering and lazy-load failures are isolated to the affected slide. After construction they are reported through `slide:error`. Initial synchronous render failures are logged to the console because a consumer cannot subscribe until the constructor returns.
 
-`motion:idle` is a lightweight lifecycle notification: subscribing does not create per-slide render snapshots. It is coalesced into a microtask after synchronous callbacks finish and is suppressed if replacement motion is still active or the carousel was destroyed. Completed navigation (including zero duration) and snapback report `'complete'`; cancelling animation or dragging reports `'cancel'` with the final rendered coordinate, without claiming that a destination was reached. Cancellation does not emit `transition:end` or `slide:change`. An already idle `stopAnimation()` is silent. Use this event to resume external work after gesture or animation cancellation; use `render` when each frame is required.
+`motion:idle` is a lightweight lifecycle notification: subscribing does not create per-slide render snapshots. It is coalesced into a microtask after synchronous callbacks finish and is suppressed if replacement motion is still active or the carousel was destroyed. Completed navigation (including zero duration), snapback and a continuous scroll reaching its finite boundary report `'complete'`; cancelling animation, dragging or continuous motion reports `'cancel'` with the final rendered coordinate, without claiming that a destination was reached. Cancellation does not emit `transition:end` or `slide:change`. An already idle `stopAnimation()` is silent. Use this event to resume external work after gesture or animation cancellation; use `render` when each frame is required.
 
 ## Built-in plugins
 
@@ -630,6 +657,7 @@ Rendering and lazy-load failures are isolated to the affected slide. After const
 - [Keyboard](src/plugins/keyboard/README.md) — focus-scoped arrow keys by default; document-wide handling is opt-in.
 - [Swipe](src/plugins/swipe/README.md) — touch, pointer, resistance, and optional mouse drag.
 - [Autoplay](src/plugins/autoplay/README.md) — interval playback with hover and interaction pausing.
+- [Auto scroll](src/plugins/autoScroll/README.md) — continuous gallery movement with speed, direction and pause/resume control.
 - [Controls](src/plugins/controls/README.md) — optional Play/Pause, circular or bar time progress, and slide counter.
 - [Lazy load](src/plugins/lazyload/README.md) — observer-based image loading and configurable preloading.
 - [Parallax](src/plugins/parallax/README.md) — position-driven visual offset.
@@ -679,6 +707,8 @@ The frozen context exposes owned event subscriptions, navigation and collection 
 
 Use `getNavigationGeometry()` for physical positions, `getNavigationTarget(1 | -1, fromIndex?)` for a resolved next/previous destination, and `getPageTargets(anchorIndex?)` for pagination. They share the core's bounds and loop rules and support variable geometry. `getStep()` and the mutable legacy `getLoopEngine()` adapter remain available for existing integrations; new plugins should use the immutable model and resolved target methods.
 
+For a custom continuous-motion controller, `startContinuousScroll(velocity)` requests the core animation clock using signed pixels per second. It returns an owned `{ isRunning(), stop() }` handle, or `null` when navigation/dragging is active or there is no movement in that direction. Revoking the plugin context stops its motion; an obsolete handle cannot stop replacement navigation. The render phase is `'scroll'` and `transitionProgress` is `null`. Crossing a nearest-slide boundary emits `slide:change`; continuous movement does not synthesize per-slide `slide:beforeChange` or transition start/end events. The built-in Auto scroll plugin adds user preferences, pause policies and state notifications to this lower-level primitive.
+
 If `install()` throws, the carousel rolls back context subscriptions and invokes the plugin cleanup. Make `destroy()` safe after partial installation.
 
 Plugin `install()` and `destroy()` must return synchronously. Promise/thenable results throw a `TypeError`; rejected results are consumed, installation is rolled back, and removal still revokes the context. Earlier versions did not check these return values and could leave a rejected asynchronous installation registered. Start asynchronous work inside a synchronous `install()`, handle its errors, and cancel it in synchronous `destroy()` (for example with `AbortController`). The carousel cannot cancel arbitrary asynchronous code that a plugin has already started.
@@ -705,7 +735,7 @@ npm run benchmark -- --counts 100,1000 --scenarios finite_plain,finite_parallax 
 
 The default matrix covers 10, 100, 1000 and 5000 cards in finite, loop, custom geometry/layout, focus and parallax modes. It records constructor time, the remaining layout flush, point updates, reverse reconciliation, native rAF render time/intervals, DOM counts, raw samples and environment metadata. Cards contain 19 elements and no network images. Each case uses a fresh sandboxed Chromium process. Run comparable checkouts serially on the same machine without other CPU-heavy work; `--repo` selects another checkout. `npm run benchmark -- --help` describes sampling and other options. Small-sample p95 is descriptive, and cloud/headless results do not define a universal slide limit or guarantee a display frame rate.
 
-DOM virtualization is not currently implemented. For an application with thousands of rich cards, assess both startup/DOM cost and per-frame work before choosing it. An opt-in virtual renderer would need an explicit mounted-range contract, overscan, geometry for unmounted slides, focus/transition pinning and content unmount/remount semantics. Existing DOM getters, full-frame effects and arbitrary custom layouts cannot silently become a visible subset. CSS rendering containment can reduce some browser work, but it does not remove DOM nodes or full-array JavaScript processing.
+DOM virtualization is not currently implemented. For an application with thousands of rich cards, assess both startup/DOM cost and per-frame work before choosing it. An opt-in virtual renderer would need an explicit mounted-range contract, overscan, geometry for unmounted slides, focus/transition pinning and content unmount/remount semantics. Existing DOM getters, full-frame effects and arbitrary custom layouts cannot silently become a visible subset. CSS rendering containment can reduce some browser work, but it does not remove DOM nodes or full-array JavaScript processing. The staged [virtualization TODO plan](TODO-virtualization.md) records the contracts, compatibility decisions and acceptance checks required before implementation.
 
 ## Security boundary
 
@@ -713,7 +743,7 @@ String `slide.content` and custom arrow HTML are inserted as HTML. They must con
 
 ## Demo
 
-[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive horizontal/vertical layouts, fractional `1.15` / `2.25` views, themed playback controls, time progress, slide counters, autoplay, fade, thumbnails, parallax, custom themes, hover-reveal arrows, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, all 12 cover transitions and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
+[Open the live demo](https://shelamkoff.github.io/carousel/) to try responsive horizontal/vertical layouts, fractional `1.15` / `2.25` views, continuous scrolling in four directions, themed playback controls, time progress, slide counters, autoplay, fade, thumbnails, parallax, custom themes, hover-reveal arrows, fixed scroll steps, auto-height media, dynamic collections, lazy rendering, all 12 cover transitions and an application-defined iris transition. The demo's JavaScript and illustrations are served locally; no third-party CDN is needed at runtime.
 
 The [Slide API playground](https://shelamkoff.github.io/carousel/demo-assets/api.html) demonstrates targeted updates, keyed collection replacement, reordering, explicit refresh, variable physical slide sizes, visual layouts and removable caption/focus/parallax effects. It also offers surface crossfade and page turn, and counts live content owners and cleanup calls. Type in a card to inspect state preservation while changing the collection and layout.
 

@@ -7,13 +7,15 @@ test.beforeEach(async ({ page }) => {
   pageErrors.set(page, errors)
   page.on('pageerror', error => errors.push(error.message))
   await page.clock.install({ time: new Date('2026-01-01T00:00:00Z') })
+  // Freeze before loading the fixture; a slow page load must not make the
+  // chosen fake-clock instant fall into the past on a busy CI worker.
+  await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'))
   await page.route('**/__surface_transitions__', route => route.fulfill({ contentType: 'text/html', body: `<!doctype html>
     <link rel="stylesheet" href="/styles/carousel.css">
     <style>#surface-host{width:400px}#surface-host article{height:180px}</style>
     <script type="importmap">{"imports":{"@shelamkoff/event-bus":"/node_modules/@shelamkoff/event-bus/dist/index.js"}}</script>
     <form id="surface-host"></form>` }))
   await page.goto('/__surface_transitions__')
-  await page.clock.pauseAt(new Date('2026-01-01T00:00:01Z'))
 })
 
 test.afterEach(async ({ page }) => {

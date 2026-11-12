@@ -174,6 +174,9 @@ export function createAutoplay(options = {}) {
     name: 'autoplay',
 
     install(context) {
+      if (context.getPlugin?.('autoscroll')) {
+        throw new Error('Carousel: autoplay and autoscroll cannot run on the same carousel')
+      }
       ctx = context
       installed = true
       active = false

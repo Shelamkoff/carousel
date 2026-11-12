@@ -11,6 +11,8 @@ export { createThumbnails } from './plugins/thumbnails.js'
 export { createKeyboard } from './plugins/keyboard.js'
 export { createSwipe } from './plugins/swipe.js'
 export { createAutoplay } from './plugins/autoplay.js'
+export { createAutoScroll } from './plugins/autoScroll.js'
+export type { AutoScrollOptions, AutoScrollPlugin } from './plugins/autoScroll.js'
 export { createControls } from './plugins/controls.js'
 export { createLazyLoad } from './plugins/lazyload.js'
 export { createParallax } from './plugins/parallax.js'
@@ -36,6 +38,8 @@ export type {
   CarouselEventMap,
   CarouselEventName,
   AutoplayState,
+  AutoScrollState,
+  CarouselScrollMotion,
 } from './types.js'
 
 export { createSlideEffect } from './effects/createSlideEffect.js'

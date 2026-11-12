@@ -57,7 +57,7 @@ export interface CarouselRenderState {
   readonly selectedIndex: number
   readonly fromIndex: number
   readonly direction: -1 | 0 | 1
-  readonly phase: 'idle' | 'drag' | 'animation'
+  readonly phase: 'idle' | 'drag' | 'animation' | 'scroll'
   /** Linear core animation progress; null outside an animation. */
   readonly transitionProgress: number | null
   readonly revision: number

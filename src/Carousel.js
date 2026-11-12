@@ -70,6 +70,7 @@ export class Carousel {
   #transitionProgress = null
   #transitionDirection = 0
   #idleNotification = null
+  #scrollMotion = null
 
   constructor(container, slides, options = {}) {
     if (!options || typeof options !== 'object' || Array.isArray(options)) {
@@ -162,6 +163,10 @@ export class Carousel {
 
     this.#trackRenderer.onResize((previousSlideSize) => {
       const previousStep = previousSlideSize + this.#trackRenderer.gap
+      if (this.#scrollMotion) {
+        this.#applyResize(previousStep)
+        return
+      }
       if (this.#viewportTransition || this.#resolvedOptions.geometry) {
         // A responsive geometry change settles the pending destination and
         // retires the decorative panels before publishing the resized state.
@@ -256,7 +261,9 @@ export class Carousel {
   /** @param {number} [previousStep] @param {number} [targetIndex] */
   #applyResize(previousStep = this.#step(), targetIndex) {
     const idx = targetIndex ?? this.getIndex()
-    const epoch = this.#navigationEpoch
+    const logical = this.#scrollMotion ? this.#geometry.logicalPosition(this.#position, !!this.#loop) : null
+    const epoch = this.#scrollMotion ? this.#stopAllAnimations() : this.#navigationEpoch
+    if (this.#destroyed || this.#navigationEpoch !== epoch) return
     this.#pendingResize = false
     this.#pendingResizeStep = null
     const apply = () => {
@@ -271,6 +278,14 @@ export class Carousel {
       this.#initLoop()
       this.#selectedIndex = idx
       this.#position = this.#geometry.indexToPosition(idx, !!this.#loop)
+      if (logical !== null && this.#geometry.count) {
+        // Keep the fractional location when responsive measurements change.
+        // This also works for unequal physical distances between snap points.
+        const lower = Math.min(Math.floor(logical), this.#geometry.count - 1)
+        const start = this.#geometry.snapPoints[lower]
+        const end = this.#geometry.snapPoints[lower + 1] ?? this.#geometry.loopLength
+        this.#position = start + (end - start) * (logical - lower)
+      }
       if (!this.#render()) return
       this.#selectedIndex = this.getIndex()
       this.#rebuilding = false
@@ -312,7 +327,7 @@ export class Carousel {
    * Loop: each slide positioned individually. Track stays at 0.
    * Non-loop: track moves, slides stay in flex flow.
    */
-  #render(clamp = true, phase = this.#animating ? 'animation' : 'idle') {
+  #render(clamp = true, phase = this.#animating ? 'animation' : this.#scrollMotion ? 'scroll' : 'idle') {
     if (this.#destroyed) return false
     if (!this.#loop && clamp) {
       const maxPos = this.#trackRenderer.getNavigationGeometry()?.maxPosition ?? 0
@@ -325,13 +340,14 @@ export class Carousel {
     return rendered && !this.#destroyed && this.#navigationEpoch === epoch
   }
 
-  #publishRenderState(phase = this.#animating ? 'animation' : 'idle') {
+  #publishRenderState(phase = this.#animating ? 'animation' : this.#scrollMotion ? 'scroll' : 'idle') {
     if (this.#destroyed) return
     // Reconfiguration can clamp the selected slide to a new finite edge.
     // Publish that settled identity before callbacks cache the frame.
-    if (phase === 'idle') this.#selectedIndex = this.getIndex()
+    if (phase === 'idle' || phase === 'scroll') this.#selectedIndex = this.getIndex()
     const delta = this.#position - this.#lastRenderPosition
-    this.#renderDirection = Math.abs(delta) > 1e-9 ? Math.sign(delta)
+    this.#renderDirection = phase === 'scroll' && this.#scrollMotion ? Math.sign(this.#scrollMotion.velocity)
+      : Math.abs(delta) > 1e-9 ? Math.sign(delta)
       : phase === 'animation' ? this.#transitionDirection : 0
     this.#lastRenderPosition = this.#position
     this.#renderPhase = phase
@@ -404,11 +420,12 @@ export class Carousel {
 
   /** Stop all running animations (rAF, CSS transition, fade). */
   #stopAllAnimations() {
-    const wasMoving = this.#animating || this.#renderPhase === 'drag'
+    const wasMoving = this.#animating || this.#scrollMotion !== null || this.#renderPhase === 'drag'
     const epoch = ++this.#navigationEpoch
     if (this.#rafId) { cancelAnimationFrame(this.#rafId); this.#rafId = 0 }
     if (this.#animationTimer) { clearTimeout(this.#animationTimer); this.#animationTimer = 0 }
     this.#animating = false
+    this.#scrollMotion = null
     this.#transitionProgress = null
     this.#transitionDirection = 0
     this.#renderState = null
@@ -445,6 +462,65 @@ export class Carousel {
       this.#dispatchEvents(() => this.#events.emit('motion:idle', payload))
     }
     queueMicrotask(publish)
+  }
+
+  /** Constant physical velocity on the same owned clock as navigation. */
+  #startContinuousScroll(velocity) {
+    if (!Number.isFinite(velocity) || velocity === 0) {
+      throw new RangeError('Carousel scroll velocity must be a nonzero finite number')
+    }
+    // A controller may request motion after an event settles. Never steal a
+    // gesture, transition, another controller or an in-progress rebuild.
+    if (this.#destroyed || this.#notifying || this.#animating || this.#scrollMotion
+      || this.#renderPhase === 'drag' || this.#queuedNavigation) return null
+    const geometry = this.#geometry
+    if (!geometry?.count || geometry.viewportSize <= 0 || geometry.loopLength <= 0) return null
+    if (!this.#loop && (velocity > 0 ? this.#position >= geometry.maxPosition : this.#position <= 0)) return null
+
+    const motion = { velocity }
+    const epoch = ++this.#navigationEpoch
+    const current = () => !this.#destroyed && this.#scrollMotion === motion && this.#navigationEpoch === epoch
+    const stop = (reason = 'cancel') => {
+      if (!current()) return
+      const stoppedEpoch = this.#stopAllAnimations()
+      if (this.#destroyed || this.#navigationEpoch !== stoppedEpoch) return
+      this.#publishRenderState('idle')
+      if (!this.#destroyed && this.#navigationEpoch === stoppedEpoch) this.#notifyMotionIdle(reason)
+    }
+    this.#scrollMotion = motion
+    this.#transitionProgress = null
+    this.#prevIndex = this.getIndex()
+    this.#publishRenderState('scroll')
+    let previousTime = performance.now()
+    const frame = now => {
+      if (!current()) return
+      // Read the live model inside the frame. A retained, stopped public handle
+      // must not keep an obsolete collection's geometry arrays alive.
+      const geometry = this.#geometry
+      this.#rafId = 0
+      // A stalled/hidden tab must not replay seconds of missed travel at once.
+      const elapsed = Math.max(0, Math.min(100, now - previousTime))
+      previousTime = now
+      const previous = this.getIndex()
+      this.#position += velocity * (elapsed / 1000)
+      if (this.#loop) this.#position = geometry.normalize(this.#position)
+      else this.#position = Math.max(0, Math.min(this.#position, geometry.maxPosition))
+      const index = this.getIndex()
+      if (index !== previous) this.#prevIndex = previous
+      if (!this.#render() || !current()) return
+      if (index !== previous) {
+        const slide = this.#slideManager.getSlide(index)
+        this.#dispatchEvents(() => this.#events.emit('slide:change', { index, prevIndex: previous, slide }))
+        if (!current()) return
+      }
+      if (!this.#loop && (velocity > 0 ? this.#position >= geometry.maxPosition : this.#position <= 0)) {
+        stop('complete')
+        return
+      }
+      this.#rafId = requestAnimationFrame(frame)
+    }
+    if (current()) this.#rafId = requestAnimationFrame(frame)
+    return Object.freeze({ isRunning: current, stop: () => stop() })
   }
 
   #destroyViewportTransition(transition) {
@@ -543,6 +619,10 @@ export class Carousel {
     if (this.#plugins.has(name) || this.#installingPluginNames.has(name)) {
       throw new Error(`Plugin "${name}" already installed or installing`)
     }
+    const otherPlayback = name === 'autoplay' ? 'autoscroll' : name === 'autoscroll' ? 'autoplay' : null
+    if (otherPlayback && (this.#plugins.has(otherPlayback) || this.#installingPluginNames.has(otherPlayback))) {
+      throw new Error('Carousel: autoplay and autoscroll cannot run on the same carousel')
+    }
     if (ownedPluginInstances.has(plugin)) throw new Error(`Plugin "${name}" is already owned by another Carousel`)
     const { context: ctx, cleanup } = this.#createPluginContext()
     ownedPluginInstances.add(plugin)
@@ -579,7 +659,9 @@ export class Carousel {
   }
 
   #createPluginContext() {
-    return createPluginScope(this.#events, {
+    let scroll = null
+    let closed = false
+    const scope = createPluginScope(this.#events, {
       next: () => this.next(),
       prev: () => this.prev(),
       goTo: (i) => this.goTo(i),
@@ -607,6 +689,14 @@ export class Carousel {
       },
 
       getPosition: () => this.#position,
+      startContinuousScroll: velocity => {
+        const next = this.#startContinuousScroll(velocity)
+        // The initial frame can synchronously remove this plugin before its
+        // returned motion handle has been attached to the scope.
+        if (closed) { next?.stop(); return null }
+        if (next) scroll = next
+        return next
+      },
       setPosition: (pos) => {
         if (!Number.isFinite(pos)) throw new TypeError('Carousel position must be finite')
         if (this.#destroyed) return
@@ -619,6 +709,8 @@ export class Carousel {
       // Used during drag (60-120fps) where cleanup overhead matters.
       setPositionDrag: (pos) => {
         if (!Number.isFinite(pos)) throw new TypeError('Carousel drag position must be finite')
+        if (this.#scrollMotion) this.#stopAllAnimations()
+        if (this.#destroyed) return
         this.#position = pos
         this.#render(false, 'drag')
       },
@@ -676,6 +768,12 @@ export class Carousel {
       return event !== 'render:reset' || this.#activeReset === null
         || this.#activeReset === this.#resetSerial
     })
+    return { context: scope.context, cleanup: () => {
+      closed = true
+      scope.cleanup()
+      scroll?.stop()
+      scroll = null
+    } }
   }
 
   /* ═══════════════ Navigation ═══════════════ */
@@ -733,6 +831,10 @@ export class Carousel {
       : Math.max(0, Math.min(index, this.#maxIndex()))
 
     let previous = fromIndex ?? this.getIndex()
+    if (this.#scrollMotion) {
+      const stoppedEpoch = this.#stopAllAnimations()
+      if (this.#destroyed || this.#navigationEpoch !== stoppedEpoch) return
+    }
     if (this.#animating) {
       if (loop || this.#perScroll() > 1) return
       // Repeating the in-flight destination must keep its completion events

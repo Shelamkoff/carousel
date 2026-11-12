@@ -178,7 +178,7 @@ test('expanding editorial demo animates previews and exposes playback controls',
   await expect(page.locator('#expand-status')).toContainText('Slide 2 of 6')
   await page.getByLabel('Card contrast').selectOption('3.5')
   await expect(region.locator('.carousel__slide').nth(1)).toHaveCSS('width', /px/)
-  await page.getByLabel('Direction').selectOption('vertical')
+  await page.getByRole('group', { name: 'Expanding card settings' }).getByLabel('Direction').selectOption('vertical')
   await expect(region).toHaveClass(/carousel--vertical/)
   expect(errors).toEqual([])
 })

@@ -52,9 +52,9 @@ export function createPluginScope(events, commands, isCurrentEvent = () => true)
   // Revoke commands as well as subscriptions; teardown can emit until closed.
   for (const name of ['emit', 'next', 'prev', 'goTo', 'addSlide', 'removeSlide',
     'updateSlide', 'moveSlide', 'setSlides', 'refresh', 'goToAfterDrag', 'snapBack',
-    'stopAnimation', 'setPosition', 'setPositionDrag', 'renderSlide', 'refreshLayout']) {
+    'stopAnimation', 'startContinuousScroll', 'setPosition', 'setPositionDrag', 'renderSlide', 'refreshLayout']) {
     const command = context[name]
-    context[name] = (...args) => closed ? undefined : command(...args)
+    context[name] = (...args) => closed ? (name === 'startContinuousScroll' ? null : undefined) : command(...args)
   }
   Object.freeze(context)
   return {

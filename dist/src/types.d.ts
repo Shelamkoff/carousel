@@ -56,6 +56,13 @@ export type CarouselTransition = CarouselTransitionName | CarouselTransitionDefi
 
 /* ── Plugin system ── */
 
+export interface CarouselScrollMotion {
+  /** False after navigation, drag, rebuild, finite boundary or scope cleanup. */
+  isRunning(): boolean
+  /** Stops only this motion; a newer navigation or controller is unaffected. */
+  stop(): void
+}
+
 export interface PluginContext {
   // Events
   on<Event extends CarouselEventName>(event: Event, handler: (...args: CarouselEventMap[Event]) => void): () => void
@@ -100,6 +107,10 @@ export interface PluginContext {
   // Position API (for swipe plugin)
   stopAnimation(): void
   getPosition(): number
+  /** Signed CSS pixels/second on the core clock; null when busy or at an edge.
+   * Call outside event dispatch (queue a microtask from event handlers).
+   * The plugin scope automatically retires its motion on removal. */
+  startContinuousScroll(velocity: number): CarouselScrollMotion | null
   setPosition(pos: number): void
   setPositionDrag(pos: number): void
   getStep(): number
@@ -173,6 +184,19 @@ export interface AutoplayState {
   readonly progress: number
 }
 
+export interface AutoScrollState {
+  readonly available: boolean
+  /** Whether continuous movement is requested, including while suspended. */
+  readonly active: boolean
+  readonly paused: boolean
+  readonly running: boolean
+  /** Positive speed in CSS pixels/second. */
+  readonly speed: number
+  readonly direction: 'forward' | 'backward'
+  /** Whether the user's reduced-motion preference currently blocks movement. */
+  readonly reducedMotion: boolean
+}
+
 export interface CarouselEventMap {
   'render': [state: CarouselRenderState]
   /** Omitted scope means a full reset; indices target retained logical slides and their copies. */
@@ -193,13 +217,14 @@ export interface CarouselEventMap {
   'slide:change': [payload: { index: number; prevIndex: number; slide: SlideData }]
   'transition:start': [payload: { fromIndex: number; toIndex: number }]
   'transition:end': [payload: { index: number }]
-  /** Coalesced microtask after navigation, snapback or cancellation settles idle. */
+  /** Coalesced microtask after navigation, snapback, a scroll boundary or cancellation settles idle. */
   'motion:idle': [payload: { index: number; position: number; reason: 'complete' | 'cancel' }]
   'transition:error': [payload: { name: string; error: Error }]
   'resize': [payload: { slidesPerView: number }]
   'autoplay:start': []
   'autoplay:stop': []
   'autoplay:state': [payload: AutoplayState]
+  'autoscroll:state': [payload: AutoScrollState]
   'slide:lazyload': [payload: { index: number; element: HTMLElement }]
   'slide:error': [payload: { index: number; error: Error }]
   'destroy': []
