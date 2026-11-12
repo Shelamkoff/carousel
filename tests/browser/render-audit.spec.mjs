@@ -59,7 +59,7 @@ test('render functions accept foreign HTML elements after adoption', async ({ pa
     const carousel = new Carousel(host, [{ content: () => content }], { transitionDuration: 0 })
     const first = host.querySelector('article')
     first?.click()
-    carousel.update({ gap: 4 })
+    carousel.refresh(0)
     const second = host.querySelector('article')
     second?.click()
     const snapshot = { rendered: !!first, preserved: second === content, activations, errors: host.querySelectorAll('.carousel__slide--error').length }
@@ -84,7 +84,7 @@ test('destroying the carousel from a render function retires the active rebuild'
       return document.createElement('article')
     } }], { loop: true, transitionDuration: 0 })
     let error = null
-    try { carousel.update({ gap: 4 }) } catch (failure) { error = failure.message }
+    try { carousel.refresh() } catch (failure) { error = failure.message }
     const snapshot = { error, children: host.childElementCount }
     host.remove()
     return snapshot
@@ -109,7 +109,7 @@ test('a reentrant update keeps the newest layout and retires the outer rebuild',
       transitionDuration: 0,
       plugins: [{ name: 'layout-probe', install(ctx) { context = ctx } }],
     })
-    carousel.update({ gap: 4 })
+    carousel.refresh()
     const snapshot = {
       widths: context.getSlideElements().map(slide => slide.style.width),
       gap: context.getTrack().style.gap,

@@ -171,6 +171,46 @@ test('an owned handler unsubscribed during an event batch is not invoked from it
   assert.equal(calls, 0)
 })
 
+test('plugin render listeners cannot receive an obsolete frame after a nested rebuild', t => {
+  const { carousel } = mount(t)
+  let changed = false
+  carousel.on('render', state => {
+    if (changed || state.phase !== 'animation') return
+    changed = true
+    carousel.update({ gap: 8 })
+  })
+  const frames = []
+  carousel.use({ name: 'frame-observer', install(context) {
+    context.on('render', state => frames.push(state))
+  } })
+
+  carousel.next()
+
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0], carousel.getRenderState())
+  assert.equal(frames[0].phase, 'idle')
+})
+
+test('a nested rebuild retires the outer reset before later plugin cleanup', t => {
+  const { carousel } = mount(t)
+  let changed = false
+  carousel.on('render:reset', () => {
+    if (changed) return
+    changed = true
+    carousel.setSlides([{ content: 'Replacement' }])
+  })
+  const notifications = []
+  carousel.use({ name: 'reset-observer', install(context) {
+    context.on('render:reset', () => notifications.push('reset'))
+    context.on('render', () => notifications.push('render'))
+  } })
+
+  carousel.update({ gap: 8 })
+
+  assert.deepEqual(notifications, ['reset', 'render'])
+  assert.equal(carousel.getSlideCount(), 1)
+})
+
 test('owned subscriptions retain EventBus deduplication for the same event and callback', t => {
   const { carousel } = mount(t)
   let context

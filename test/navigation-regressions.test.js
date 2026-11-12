@@ -2049,6 +2049,26 @@ test('render state exposes continuous geometry for drag, loop copies and expand'
   }
 })
 
+test('settled render snapshots clamp the selected index before notifying effects', () => {
+  const { carousel } = mount(400, 5, { transitionDuration: 0 })
+  try {
+    carousel.goTo(4)
+    const frames = []
+    carousel.on('render', state => frames.push(state))
+
+    carousel.update({ slidesPerView: 3 })
+    assert.equal(carousel.getIndex(), 2)
+    assert.equal(frames.at(-1).phase, 'idle')
+    assert.equal(frames.at(-1).selectedIndex, 2)
+    assert.equal(carousel.getRenderState().selectedIndex, 2)
+
+    carousel.setSlides(carousel.getSlides().slice(0, 3))
+    assert.equal(carousel.getIndex(), 0)
+    assert.equal(frames.at(-1).selectedIndex, 0)
+    assert.equal(carousel.getRenderState().selectedIndex, 0)
+  } finally { carousel.destroy() }
+})
+
 test('custom layout controls geometry while navigation and DOM ownership remain in core', () => {
   const { carousel, track } = mount(400, 4, {
     transitionDuration: 0,

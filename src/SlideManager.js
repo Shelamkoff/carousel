@@ -62,7 +62,11 @@ export class SlideManager {
     }
     const next = [...this.#slides]
     next.splice(index, 0, slide)
-    this.setSlides(next)
+    validateSlides(next)
+    this.#slides = next
+    // Insertion introduces one occurrence, even when the same data object is
+    // already present. Existing occurrences must keep their own DOM identities.
+    this.#keys.splice(index, 0, {})
   }
 
   removeSlide(index) {

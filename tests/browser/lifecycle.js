@@ -125,6 +125,8 @@ try {
   })
   failOnRebuild = true
   resilient.update({ gap: 1 })
+  assert(renderErrors === 0, 'layout update rerendered unchanged content')
+  resilient.refresh()
   assert(renderErrors === 1, 'rebuild render failure was not isolated')
   assert(renderHost.querySelectorAll('.carousel__slide').length === 2, 'render failure corrupted rebuilt DOM')
   resilient.destroy()

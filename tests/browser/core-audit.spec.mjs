@@ -186,6 +186,7 @@ test('render navigation uses the rebuilt layout and yields to newer direct reque
         ...Array.from({ length: insertionAction ? 4 : 3 }, (_, index) => ({ content: String(index + 1) })),
       ], {
         loop, startIndex: insertionAction ? 2 : 0, transitionDuration: 0,
+        slidesPerView: insertionAction ? 1 : 2, gap: insertionAction ? 0 : 10,
         plugins: [{ name: 'position-observer', install(ctx) { context = ctx } }],
       })
       const events = []
@@ -200,7 +201,7 @@ test('render navigation uses the rebuilt layout and yields to newer direct reque
             carousel[insertionAction]()
             return document.createElement('article')
           } }, 0)
-        } else carousel.update({ slidesPerView: 2, gap: 10 })
+        } else carousel.refresh(0)
         const eventsAfterRebuild = [...events]
         if (freshTarget !== null) carousel.goTo(freshTarget)
         await Promise.resolve()

@@ -50,12 +50,21 @@ export function createSlideEffect(definition) {
 
   function render(state) {
     if (!context || !instance || !state) return
+    // An earlier subscriber can rebuild during EventBus's snapshotted dispatch.
+    // The same check also retires a queued frame superseded before its microtask.
+    if (state !== context.getRenderState()) return
     if (rendering) { pending = state; return }
+    const owner = context
+    const active = instance
     rendering = true
     const previous = renderingVersion
     renderingVersion = version
-    try { synchronous(instance.render(state), 'render()') }
-    catch (error) { fail(error) }
+    try { synchronous(active.render(state), 'render()') }
+    catch (error) {
+      // A render may uninstall and reinstall this plugin before throwing.
+      // Its obsolete failure must not tear down the replacement instance.
+      if (context === owner && instance === active) fail(error)
+    }
     finally {
       renderingVersion = previous
       rendering = false
@@ -106,11 +115,11 @@ export function createSlideEffect(definition) {
       }
       try {
         const created = synchronous(definition.create(Object.freeze({ root, viewport, setStyle })), 'create()')
+        instance = created
         if (!created || typeof created.render !== 'function'
           || created.destroy !== undefined && typeof created.destroy !== 'function') {
           throw new TypeError('Carousel: effect create() must return render(frame) and optional destroy()')
         }
-        instance = created
         unsubscribers = [ctx.on('render', render), ctx.on('render:reset', reset)]
         render(ctx.getRenderState())
       } catch (error) { fail(error) }

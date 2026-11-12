@@ -524,7 +524,9 @@ export class TrackRenderer {
         if (this.#revision !== revision) return
       }
     }
-    for (const old of this.#slideElements) {
+    // A connected callback can interrupt an outer insertion before it publishes
+    // its element snapshot. Reconcile the owned track, including those wrappers.
+    for (const old of [...this.#track.children]) {
       if (!kept.has(old)) {
         old.remove()
         if (this.#revision !== revision) return

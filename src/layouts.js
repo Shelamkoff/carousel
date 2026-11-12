@@ -32,11 +32,12 @@ export function resolveLayoutSlots(layout, context, options) {
   }
   // Validate the entire frame before writing anything. Never leave a partially
   // applied frame after an invalid return, including NaN, Infinity or a Promise.
-  return output.map((slot, index) => {
-    if (!slot || !Number.isFinite(slot.offset) || !Number.isFinite(slot.size) || slot.size < 0
-      || slot.progress !== undefined && !Number.isFinite(slot.progress)) {
+  return Array.from(output, (slot, index) => {
+    const { offset, size, progress } = slot ?? {}
+    if (!Number.isFinite(offset) || !Number.isFinite(size) || size < 0
+      || progress !== undefined && !Number.isFinite(progress)) {
       throw new TypeError('Carousel: layout geometry must contain finite offsets, sizes and progress')
     }
-    return { offset: slot.offset, size: slot.size, progress: slot.progress ?? input.slides[index].progress }
+    return { offset, size, progress: progress ?? input.slides[index].progress }
   })
 }

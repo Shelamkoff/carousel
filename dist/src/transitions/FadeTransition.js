@@ -1,5 +1,17 @@
 const properties = ['position', 'top', 'left', 'width', 'height', 'opacity', 'visibility', 'transform', 'transition']
 
+function saveStyles(style, names) {
+  return names.map(name => [name, style.getPropertyValue?.(name) ?? style[name] ?? '',
+    style.getPropertyPriority?.(name) ?? ''])
+}
+
+function restoreStyles(style, saved) {
+  for (const [name, value, priority] of saved) {
+    if (style.setProperty) style.setProperty(name, value, priority)
+    else style[name] = value
+  }
+}
+
 /** Owns temporary stacking styles; Carousel supplies the only animation clock. */
 export class FadeTransition {
   #slides
@@ -20,8 +32,8 @@ export class FadeTransition {
     this.#from = from
     this.#to = to
     this.#direction = direction || 1
-    this.#saved = slides.map(slide => Object.fromEntries(properties.map(key => [key, slide.style[key] ?? ''])))
-    this.#trackStyle = { height: track?.style.height ?? '', transform: track?.style.transform ?? '' }
+    this.#saved = slides.map(slide => saveStyles(slide.style, properties))
+    this.#trackStyle = track ? saveStyles(track.style, ['height', 'transform']) : []
     const vertical = orientation === 'vertical'
     if (track) {
       track.style.height = (vertical ? viewportSize : track.offsetHeight) + 'px'
@@ -56,7 +68,7 @@ export class FadeTransition {
   destroy() {
     if (this.#destroyed) return
     this.#destroyed = true
-    this.#slides.forEach((slide, index) => Object.assign(slide.style, this.#saved[index]))
-    if (this.#track) Object.assign(this.#track.style, this.#trackStyle)
+    this.#slides.forEach((slide, index) => restoreStyles(slide.style, this.#saved[index]))
+    if (this.#track) restoreStyles(this.#track.style, this.#trackStyle)
   }
 }

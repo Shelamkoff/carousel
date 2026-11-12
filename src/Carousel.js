@@ -57,6 +57,8 @@ export class Carousel {
   #focusRequest = null
   #renderState = null
   #renderSerial = 0
+  #resetSerial = 0
+  #activeReset = null
   #renderPhase = 'idle'
   #lastRenderPosition = 0
   #renderDirection = 0
@@ -301,6 +303,9 @@ export class Carousel {
 
   #publishRenderState(phase = this.#animating ? 'animation' : 'idle') {
     if (this.#destroyed) return
+    // Reconfiguration can clamp the selected slide to a new finite edge.
+    // Publish that settled identity before callbacks cache the frame.
+    if (phase === 'idle') this.#selectedIndex = this.getIndex()
     const delta = this.#position - this.#lastRenderPosition
     this.#renderDirection = Math.abs(delta) > 1e-9 ? Math.sign(delta)
       : phase === 'animation' ? this.#transitionDirection : 0
@@ -312,6 +317,13 @@ export class Carousel {
       const state = this.getRenderState()
       this.#dispatchEvents(() => this.#events.emit('render', state))
     }
+  }
+
+  #resetRender() {
+    const previous = this.#activeReset
+    this.#activeReset = ++this.#resetSerial
+    try { this.#events.emit('render:reset') }
+    finally { this.#activeReset = previous }
   }
 
   /** Lazy, immutable snapshots keep the unobserved finite path constant-time. */
@@ -341,7 +353,7 @@ export class Carousel {
     this.#resolvedOptions = validateResolvedOptions(this.#breakpointManager.resolve())
     const opts = this.#resolvedOptions
     this.#dispatchEvents(() => {
-      this.#events.emit('render:reset')
+      this.#resetRender()
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout())
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
@@ -590,7 +602,7 @@ export class Carousel {
         const epoch = this.#navigationEpoch
         let rendered = false
         this.#dispatchEvents(() => {
-          this.#events.emit('render:reset')
+          this.#resetRender()
           if (this.#destroyed || this.#navigationEpoch !== epoch) return
           rendered = this.#trackRenderer.renderSlide(i, slide)
           if (!this.#destroyed && this.#navigationEpoch === epoch) this.#render()
@@ -598,7 +610,8 @@ export class Carousel {
         return rendered
       },
       refreshLayout: () => this.#trackRenderer.refreshLayout(),
-    })
+    }, event => event !== 'render:reset' || this.#activeReset === null
+      || this.#activeReset === this.#resetSerial)
   }
 
   /* ═══════════════ Navigation ═══════════════ */
@@ -1017,7 +1030,7 @@ export class Carousel {
     this.#pendingResizeStep = null
     const opts = this.#resolvedOptions
     this.#dispatchEvents(() => {
-      this.#events.emit('render:reset')
+      this.#resetRender()
       if (this.#destroyed || this.#navigationEpoch !== epoch) return
       this.#trackRenderer.rebuild(this.#slideManager.getSlides(), this.#trackLayout(), refreshContent)
       if (this.#destroyed || this.#navigationEpoch !== epoch) return

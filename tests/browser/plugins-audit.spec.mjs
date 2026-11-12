@@ -188,7 +188,7 @@ test('lazy loading preserves the newest successful render after a nested update'
       return content
     } }], { transitionDuration: 0, plugins: [createLazyLoad({ preload: 0 })] })
     const originalSlide = host.querySelector('.carousel__slide')
-    carousel.update({ gap: 4 })
+    carousel.refresh(0)
     const slide = host.querySelector('.carousel__slide')
     const snapshot = {
       sameElement: slide === originalSlide,

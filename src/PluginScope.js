@@ -1,5 +1,5 @@
 /** Owns a plugin's event subscriptions and revocable command scope. */
-export function createPluginScope(events, commands) {
+export function createPluginScope(events, commands, isCurrentEvent = () => true) {
   const subscriptions = new Set()
   const onSubscriptions = new Map()
   let closed = false
@@ -26,7 +26,10 @@ export function createPluginScope(events, commands) {
       remove()
     }
     const remove = events.on(ev, (...args) => {
-      if (!active || closed) return
+      if (!active || closed || !isCurrentEvent(ev)) return
+      // Earlier callbacks may publish a replacement frame while EventBus
+      // is still iterating the previous emission's listener snapshot.
+      if (ev === 'render' && args[0] !== commands.getRenderState()) return
       // Remove before dispatch so nested emissions cannot repeat a once
       // callback or retain its subscription in a long-lived plugin.
       if (once) unsubscribe()
